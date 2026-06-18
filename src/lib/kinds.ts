@@ -1,29 +1,36 @@
 // The visual signature of Tracelens: span kind == color.
-// Used everywhere — the tree, the waterfall bars, the detail badge, the legend —
-// so the colour itself tells you what kind of step you are looking at.
+// Colors live in styles/tokens.css as --kind-* variables (one value per theme),
+// so a kind looks correct in light and dark automatically. This module only
+// says WHICH variable a kind maps to.
 
 import type { SpanKind } from "../core/types";
 
 export interface KindStyle {
   label: string;
-  color: string;
+  color: string; // CSS var reference, e.g. "var(--kind-llm)" — themeable
 }
 
 export const KIND_STYLES: Record<SpanKind, KindStyle> = {
-  agent: { label: "Agent", color: "#8B7CF6" }, // indigo — the host/orchestrator
-  llm: { label: "LLM", color: "#E8A23D" }, // amber — model calls
-  tool: { label: "Tool", color: "#2DD4BF" }, // teal — tool / function calls
-  retriever: { label: "Retriever", color: "#A78BFA" }, // purple — retrieval
-  chain: { label: "Chain", color: "#8A93A6" }, // grey-blue — generic chains
-  embedding: { label: "Embedding", color: "#5FB6E8" }, // light blue
-  reranker: { label: "Reranker", color: "#C77DFF" }, // violet
-  guardrail: { label: "Guardrail", color: "#E8C84D" }, // yellow
-  evaluator: { label: "Evaluator", color: "#6FD08C" }, // green
-  unknown: { label: "Span", color: "#6B7486" }, // neutral grey
+  agent: { label: "Agent", color: "var(--kind-agent)" },
+  llm: { label: "LLM", color: "var(--kind-llm)" },
+  tool: { label: "Tool", color: "var(--kind-tool)" },
+  retriever: { label: "Retriever", color: "var(--kind-retriever)" },
+  chain: { label: "Chain", color: "var(--kind-chain)" },
+  embedding: { label: "Embedding", color: "var(--kind-embedding)" },
+  reranker: { label: "Reranker", color: "var(--kind-reranker)" },
+  guardrail: { label: "Guardrail", color: "var(--kind-guardrail)" },
+  evaluator: { label: "Evaluator", color: "var(--kind-evaluator)" },
+  unknown: { label: "Span", color: "var(--kind-unknown)" },
 };
 
-export const ERROR_COLOR = "#F0556B";
+// Retained for back-compat with v0 components still present until Task 13.
+export const ERROR_COLOR = "var(--error)";
 
 export function kindStyle(kind: SpanKind): KindStyle {
   return KIND_STYLES[kind] ?? KIND_STYLES.unknown;
+}
+
+/** CSS color reference for a kind, e.g. "var(--kind-llm)". */
+export function kindColor(kind: SpanKind): string {
+  return kindStyle(kind).color;
 }
