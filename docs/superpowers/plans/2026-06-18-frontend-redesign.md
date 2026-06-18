@@ -433,11 +433,11 @@ const ALL_KINDS = [
 ] as const;
 
 describe("kinds", () => {
-  it("maps every SpanKind to a label and a --kind-* css var", () => {
+  it("maps every SpanKind to a label and a var(--kind-*) color", () => {
     for (const k of ALL_KINDS) {
       const style = KIND_STYLES[k];
       expect(style.label.length).toBeGreaterThan(0);
-      expect(style.cssVar).toMatch(/^--kind-/);
+      expect(style.color).toMatch(/^var\(--kind-/);
     }
   });
 
@@ -448,7 +448,7 @@ describe("kinds", () => {
 
   it("falls back to unknown for an unrecognized kind", () => {
     // @ts-expect-error testing the runtime fallback
-    expect(kindStyle("bogus").cssVar).toBe("--kind-unknown");
+    expect(kindStyle("bogus").color).toBe("var(--kind-unknown)");
   });
 });
 ```
@@ -470,21 +470,24 @@ import type { SpanKind } from "../core/types";
 
 export interface KindStyle {
   label: string;
-  cssVar: string; // e.g. "--kind-llm"
+  color: string; // CSS var reference, e.g. "var(--kind-llm)" — themeable
 }
 
 export const KIND_STYLES: Record<SpanKind, KindStyle> = {
-  agent: { label: "Agent", cssVar: "--kind-agent" },
-  llm: { label: "LLM", cssVar: "--kind-llm" },
-  tool: { label: "Tool", cssVar: "--kind-tool" },
-  retriever: { label: "Retriever", cssVar: "--kind-retriever" },
-  chain: { label: "Chain", cssVar: "--kind-chain" },
-  embedding: { label: "Embedding", cssVar: "--kind-embedding" },
-  reranker: { label: "Reranker", cssVar: "--kind-reranker" },
-  guardrail: { label: "Guardrail", cssVar: "--kind-guardrail" },
-  evaluator: { label: "Evaluator", cssVar: "--kind-evaluator" },
-  unknown: { label: "Span", cssVar: "--kind-unknown" },
+  agent: { label: "Agent", color: "var(--kind-agent)" },
+  llm: { label: "LLM", color: "var(--kind-llm)" },
+  tool: { label: "Tool", color: "var(--kind-tool)" },
+  retriever: { label: "Retriever", color: "var(--kind-retriever)" },
+  chain: { label: "Chain", color: "var(--kind-chain)" },
+  embedding: { label: "Embedding", color: "var(--kind-embedding)" },
+  reranker: { label: "Reranker", color: "var(--kind-reranker)" },
+  guardrail: { label: "Guardrail", color: "var(--kind-guardrail)" },
+  evaluator: { label: "Evaluator", color: "var(--kind-evaluator)" },
+  unknown: { label: "Span", color: "var(--kind-unknown)" },
 };
+
+// Retained for back-compat with v0 components still present until Task 13.
+export const ERROR_COLOR = "var(--error)";
 
 export function kindStyle(kind: SpanKind): KindStyle {
   return KIND_STYLES[kind] ?? KIND_STYLES.unknown;
@@ -492,7 +495,7 @@ export function kindStyle(kind: SpanKind): KindStyle {
 
 /** CSS color reference for a kind, e.g. "var(--kind-llm)". */
 export function kindColor(kind: SpanKind): string {
-  return `var(${kindStyle(kind).cssVar})`;
+  return kindStyle(kind).color;
 }
 ```
 
@@ -1214,7 +1217,7 @@ import { ThemeToggle } from "./shell/ThemeToggle";
 interface Props {
   onLoad: (trace: ParsedTrace, label: string) => void;
   onError: (message: string) => void;
-  error: string | null;
+  error?: string | null; // optional so the v0 App still compiles until Task 13
 }
 
 const SAMPLES = [
