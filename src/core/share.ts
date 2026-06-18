@@ -37,7 +37,7 @@ async function pipeThrough(
   stream: CompressionStream | DecompressionStream,
 ): Promise<Uint8Array> {
   const writer = stream.writable.getWriter();
-  void writer.write(data);
+  void writer.write(data as BufferSource);
   void writer.close();
   const buf = await new Response(stream.readable).arrayBuffer();
   return new Uint8Array(buf);
