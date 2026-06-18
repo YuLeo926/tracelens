@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","status":"completed","aggregated_output":"docs\nsdk\nexamples"}}
+{"type":"item.completed","item":{"id":"item_2","type":"web_search","query":"openinference span attributes","status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"bash -lc 'cat missing.txt'","status":"failed","aggregated_output":"cat: missing.txt: No such file or directory"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"The repo has docs, sdk, and examples directories."}}
+{"type":"turn.completed","usage":{"input_tokens":24763,"output_tokens":122}}

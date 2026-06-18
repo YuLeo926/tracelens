@@ -14,6 +14,7 @@ const SAMPLES = [
   { file: "tool-error.json", label: "Tool error + recovery", hint: "6 spans · 1 error" },
   { file: "otlp-trace.json", label: "OpenTelemetry (OTLP)", hint: "4 spans · OTLP format" },
   { file: "anthropic-log.json", label: "Claude (Anthropic) log", hint: "3 calls · 1 error" },
+  { file: "codex-session.jsonl", label: "Codex exec --json", hint: "4 steps · 1 failed" },
 ];
 
 export function Loader({ onLoad, onError, error }: Props) {
