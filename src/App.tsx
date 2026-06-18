@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedTrace } from "./core/types";
 import { searchTrace, errorSpanIds, slowestSpanId } from "./core/search";
+import { encodeShare, shareUrl, shareSupported } from "./core/share";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { Loader } from "./components/Loader";
 import { AppShell } from "./components/shell/AppShell";
@@ -18,11 +19,13 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [matchIndex, setMatchIndex] = useState(0);
+  const [rawSource, setRawSource] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const onLoad = (t: ParsedTrace, lbl: string) => {
+  const onLoad = (t: ParsedTrace, lbl: string, source: string) => {
     setTrace(t);
     setLabel(lbl);
+    setRawSource(source);
     setSelectedId(t.roots[0]?.spanId ?? null);
     setActiveView(DEFAULT_VIEW);
     setError(null);
@@ -38,6 +41,7 @@ export default function App() {
     setActiveView(DEFAULT_VIEW);
     setQuery("");
     setMatchIndex(0);
+    setRawSource("");
   };
 
   const search = useMemo(
@@ -89,6 +93,32 @@ export default function App() {
     if (id) setSelectedId(id);
   }, [trace]);
 
+  const canShare = shareSupported();
+
+  const copyShareLink = useCallback(async () => {
+    if (!rawSource) return;
+    try {
+      const encoded = await encodeShare({ name: label, source: rawSource });
+      const url = shareUrl(window.location.origin + window.location.pathname, encoded);
+      await navigator.clipboard.writeText(url);
+    } catch {
+      /* clipboard or compression unavailable — Copy is disabled when unsupported */
+    }
+  }, [rawSource, label]);
+
+  const downloadJson = useCallback(() => {
+    if (!rawSource) return;
+    const blob = new Blob([rawSource], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${label || "trace"}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, [rawSource, label]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -116,6 +146,7 @@ export default function App() {
           label={label}
           summary={trace.summary}
           onReset={reset}
+          exportActions={{ onCopyLink: copyShareLink, onDownloadJson: downloadJson, canShare }}
           search={{
             query,
             onQueryChange,

@@ -4,9 +4,9 @@ import type { ParsedTrace } from "../core/types";
 import { ThemeToggle } from "./shell/ThemeToggle";
 
 interface Props {
-  onLoad: (trace: ParsedTrace, label: string) => void;
+  onLoad: (trace: ParsedTrace, label: string, source: string) => void;
   onError: (message: string) => void;
-  error?: string | null; // optional so the v0 App still compiles until Task 13
+  error?: string | null;
 }
 
 const SAMPLES = [
@@ -20,7 +20,7 @@ export function Loader({ onLoad, onError, error }: Props) {
   const ingest = useCallback(
     (text: string, label: string) => {
       try {
-        onLoad(parseTrace(JSON.parse(text)), label);
+        onLoad(parseTrace(JSON.parse(text)), label, text);
       } catch (err) {
         onError(
           err instanceof Error
