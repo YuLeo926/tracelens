@@ -101,6 +101,9 @@ export default function App() {
   }, []);
 
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
+  const filtering = query.trim().length > 0;
+  const currentMatchId =
+    matchCount > 0 ? (search?.orderedMatchIds[matchIndex] ?? null) : null;
 
   return (
     <ThemeProvider>
@@ -130,7 +133,16 @@ export default function App() {
         >
           <section className="min-h-0 overflow-hidden border-r border-border bg-panel">
             {activeView === "tree" && (
-              <TreeView trace={trace} selectedId={selectedId} onSelect={setSelectedId} />
+              <TreeView
+                trace={trace}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                filtering={filtering}
+                visibleIds={search?.visibleIds ?? null}
+                matchIds={search?.matchIds ?? null}
+                currentMatchId={currentMatchId}
+                query={query}
+              />
             )}
             {activeView === "flamegraph" && <FlamegraphView />}
             {activeView === "diff" && <DiffView />}

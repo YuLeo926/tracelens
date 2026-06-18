@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ParsedTrace } from "../../../core/types";
 import { flatten } from "../../../core/parse";
 import { SpanRow } from "./SpanRow";
@@ -8,12 +8,23 @@ interface Props {
   trace: ParsedTrace;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  filtering: boolean;
+  visibleIds: Set<string> | null;
+  matchIds: Set<string> | null;
+  currentMatchId: string | null;
+  query: string;
 }
 
-export function TreeView({ trace, selectedId, onSelect }: Props) {
+export function TreeView({
+  trace, selectedId, onSelect, filtering, visibleIds, matchIds, currentMatchId, query,
+}: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const rows = flatten(trace.roots, collapsed);
   const { startMs, durationMs } = trace.summary;
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // When filtering, ignore the collapse set and show matches + ancestors only.
+  const allRows = flatten(trace.roots, filtering ? undefined : collapsed);
+  const rows = filtering && visibleIds ? allRows.filter((n) => visibleIds.has(n.spanId)) : allRows;
 
   const toggle = (id: string) => {
     setCollapsed((prev) => {
@@ -24,23 +35,36 @@ export function TreeView({ trace, selectedId, onSelect }: Props) {
     });
   };
 
+  useEffect(() => {
+    if (!currentMatchId) return;
+    const el = containerRef.current?.querySelector(`[data-span-id="${currentMatchId}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [currentMatchId]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <TimeAxis durationMs={durationMs} />
-      <div className="min-h-0 flex-1 overflow-auto py-1">
-        {rows.map((node) => (
-          <SpanRow
-            key={node.spanId}
-            node={node}
-            traceStart={startMs}
-            traceDuration={durationMs}
-            selected={node.spanId === selectedId}
-            hasChildren={node.children.length > 0}
-            collapsed={collapsed.has(node.spanId)}
-            onSelect={() => onSelect(node.spanId)}
-            onToggle={() => toggle(node.spanId)}
-          />
-        ))}
+      <div ref={containerRef} className="min-h-0 flex-1 overflow-auto py-1">
+        {rows.length === 0 ? (
+          <div className="px-4 py-3 text-[12px] text-muted">No spans match "{query}".</div>
+        ) : (
+          rows.map((node) => (
+            <SpanRow
+              key={node.spanId}
+              node={node}
+              traceStart={startMs}
+              traceDuration={durationMs}
+              selected={node.spanId === selectedId}
+              hasChildren={node.children.length > 0}
+              collapsed={collapsed.has(node.spanId)}
+              isMatch={matchIds?.has(node.spanId) ?? false}
+              query={query}
+              showToggle={!filtering}
+              onSelect={() => onSelect(node.spanId)}
+              onToggle={() => toggle(node.spanId)}
+            />
+          ))
+        )}
       </div>
     </div>
   );
