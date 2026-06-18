@@ -1,18 +1,24 @@
 @import "tailwindcss";
+@import "./tokens.css";
 
-:root {
-  --bg: #0d1017;
-  --panel: #141925;
-  --panel-2: #10151f;
-  --elev: #1a2030;
-  --border: #232a3a;
-  --border-soft: #1b2230;
-  --text: #e6e9f0;
-  --muted: #8a93a6;
-  --muted-2: #5a6273;
-  --accent: #e8a23d;
-  --error: #f0556b;
-  color-scheme: dark;
+/* Expose semantic tokens as Tailwind color utilities (bg-panel, text-muted,
+   border-border, …). `inline` keeps them as live var() refs so they follow
+   data-theme at runtime. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-rail: var(--rail);
+  --color-elev: var(--elev);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-track: var(--track);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-error: var(--error);
 }
 
 html,
@@ -36,13 +42,11 @@ body {
     Consolas, monospace;
 }
 
-/* The lens wordmark: lowercase, generously tracked. */
 .wordmark {
   letter-spacing: 0.16em;
   font-weight: 600;
 }
 
-/* Quiet, thin scrollbars to match the instrument-panel feel. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;

@@ -1,0 +1,61 @@
+/* Design tokens. Every color the UI uses is defined here, once per theme.
+   Switching theme = setting data-theme on <html>; nothing else re-styles. */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #f1f3f6;
+  --rail: #f0f1f4;
+  --elev: #f3f4ff;
+  --text: #1c1f23;
+  --muted: #6b7280;
+  --faint: #9aa1ad;
+  --border: #e6e8ec;
+  --border-soft: #eef0f3;
+  --track: #edeef1;
+  --accent: #6366f1;
+  --accent-strong: #4f46e5;
+  --error: #dc2626;
+
+  --kind-agent: #6366f1;
+  --kind-llm: #d97706;
+  --kind-tool: #0d9488;
+  --kind-retriever: #7c3aed;
+  --kind-chain: #64748b;
+  --kind-embedding: #0ea5e9;
+  --kind-reranker: #c026d3;
+  --kind-guardrail: #ca8a04;
+  --kind-evaluator: #16a34a;
+  --kind-unknown: #6b7280;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --panel: #15181e;
+  --panel-2: #10151f;
+  --rail: #12141a;
+  --elev: #1b1f27;
+  --text: #e6e8ec;
+  --muted: #8a93a6;
+  --faint: #6b7486;
+  --border: #232830;
+  --border-soft: #1b1f27;
+  --track: #232830;
+  --accent: #8b7cf6;
+  --accent-strong: #a78bfa;
+  --error: #f0556b;
+
+  --kind-agent: #8b7cf6;
+  --kind-llm: #e8a23d;
+  --kind-tool: #2dd4bf;
+  --kind-retriever: #a78bfa;
+  --kind-chain: #8a93a6;
+  --kind-embedding: #5fb6e8;
+  --kind-reranker: #c77dff;
+  --kind-guardrail: #e8c84d;
+  --kind-evaluator: #6fd08c;
+  --kind-unknown: #6b7486;
+}
