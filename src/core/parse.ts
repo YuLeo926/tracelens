@@ -15,7 +15,7 @@ export function parseTrace(json: unknown): ParsedTrace {
   const loose = extractSpans(json);
   if (loose.length === 0) {
     throw new TraceParseError(
-      'No spans found. Expected a JSON array of spans, or an object with a "spans" array.',
+      'No spans found. Expected a JSON array of spans, an object with a "spans" array, or an OpenTelemetry (OTLP) export.',
     );
   }
 
