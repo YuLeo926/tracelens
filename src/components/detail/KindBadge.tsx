@@ -1,9 +1,8 @@
 import type { SpanKind } from "../../core/types";
-import { kindStyle, kindColor } from "../../lib/kinds";
+import { kindStyle } from "../../lib/kinds";
 
 export function KindBadge({ kind }: { kind: SpanKind }) {
-  const { label } = kindStyle(kind);
-  const color = kindColor(kind);
+  const { label, color } = kindStyle(kind);
   return (
     <span
       className="mono inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wider"

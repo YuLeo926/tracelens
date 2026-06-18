@@ -18,6 +18,7 @@
   --color-track: var(--track);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--on-accent);
   --color-error: var(--error);
 }
 

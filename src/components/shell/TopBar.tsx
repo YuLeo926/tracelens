@@ -23,7 +23,7 @@ export function TopBar({ label, onReset }: Props) {
       </button>
       <button
         onClick={onReset}
-        className="shrink-0 rounded-lg border border-accent-strong bg-accent-strong px-3 py-1.5 text-[12px] text-white hover:brightness-110"
+        className="shrink-0 rounded-lg border border-accent-strong bg-accent-strong px-3 py-1.5 text-[12px] text-on-accent hover:brightness-110"
       >
         New trace
       </button>

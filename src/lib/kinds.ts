@@ -23,9 +23,6 @@ export const KIND_STYLES: Record<SpanKind, KindStyle> = {
   unknown: { label: "Span", color: "var(--kind-unknown)" },
 };
 
-// Retained for back-compat with v0 components still present until Task 13.
-export const ERROR_COLOR = "var(--error)";
-
 export function kindStyle(kind: SpanKind): KindStyle {
   return KIND_STYLES[kind] ?? KIND_STYLES.unknown;
 }

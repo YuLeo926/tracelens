@@ -17,6 +17,7 @@
   --track: #edeef1;
   --accent: #6366f1;
   --accent-strong: #4f46e5;
+  --on-accent: #ffffff;
   --error: #dc2626;
 
   --kind-agent: #6366f1;
@@ -46,6 +47,7 @@
   --track: #232830;
   --accent: #8b7cf6;
   --accent-strong: #a78bfa;
+  --on-accent: #15181e;
   --error: #f0556b;
 
   --kind-agent: #8b7cf6;

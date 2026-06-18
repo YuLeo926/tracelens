@@ -29,6 +29,7 @@ export default function App() {
     setSelectedId(null);
     setError(null);
     setLabel("");
+    setActiveView(DEFAULT_VIEW);
   };
 
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
