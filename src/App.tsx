@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedTrace } from "./core/types";
-import { parseTrace } from "./core/parse";
+import { parseTraceText } from "./core/parse";
 import { searchTrace, errorSpanIds, slowestSpanId } from "./core/search";
 import { encodeShare, decodeShare, readShareHash, shareUrl, shareSupported } from "./core/share";
 import { ThemeProvider } from "./theme/ThemeProvider";
@@ -142,7 +142,7 @@ export default function App() {
     decodeShare(token)
       .then((payload) => {
         if (cancelled) return;
-        onLoad(parseTrace(JSON.parse(payload.source)), payload.name, payload.source);
+        onLoad(parseTraceText(payload.source), payload.name, payload.source);
       })
       .catch(() => {
         if (!cancelled) setError("This share link could not be opened.");

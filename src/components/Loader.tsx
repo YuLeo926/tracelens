@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { parseTrace } from "../core/parse";
+import { parseTraceText } from "../core/parse";
 import type { ParsedTrace } from "../core/types";
 import { ThemeToggle } from "./shell/ThemeToggle";
 
@@ -21,7 +21,7 @@ export function Loader({ onLoad, onError, error }: Props) {
   const ingest = useCallback(
     (text: string, label: string) => {
       try {
-        onLoad(parseTrace(JSON.parse(text)), label, text);
+        onLoad(parseTraceText(text), label, text);
       } catch (err) {
         onError(
           err instanceof Error

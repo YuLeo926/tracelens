@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTrace, flatten, TraceParseError } from "./parse";
+import { parseTrace, flatten, TraceParseError, decodeTraceText } from "./parse";
 import { toMs } from "./openinference";
 import { formatDuration, formatTokens, formatCost } from "./format";
 import research from "../../public/samples/research-agent.json";
@@ -74,5 +74,20 @@ describe("formatting", () => {
     expect(formatTokens(1470)).toBe("1.5k");
     expect(formatCost(0.0021)).toBe("$0.0021");
     expect(formatCost(undefined)).toBe("—");
+  });
+});
+
+describe("decodeTraceText", () => {
+  it("parses whole-file JSON", () => {
+    expect(decodeTraceText('[{"a":1}]')).toEqual([{ a: 1 }]);
+  });
+  it("parses JSONL into an array, skipping blank lines", () => {
+    expect(decodeTraceText('{"type":"a"}\n\n{"type":"b"}\n')).toEqual([
+      { type: "a" },
+      { type: "b" },
+    ]);
+  });
+  it("throws on text that is neither JSON nor JSONL", () => {
+    expect(() => decodeTraceText("not json at all")).toThrow(TraceParseError);
   });
 });

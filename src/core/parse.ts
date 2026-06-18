@@ -55,6 +55,33 @@ export function parseTrace(json: unknown): ParsedTrace {
   return { roots, byId, summary: summarize(spans) };
 }
 
+/** Decode raw file text as JSON, or as JSONL (newline-delimited JSON objects). */
+export function decodeTraceText(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const objs: unknown[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        objs.push(JSON.parse(t));
+      } catch {
+        /* skip non-JSON lines */
+      }
+    }
+    if (objs.length === 0) {
+      throw new TraceParseError("That file is not valid JSON or JSONL.");
+    }
+    return objs;
+  }
+}
+
+/** Decode raw file text (JSON or JSONL) and parse it into a trace. */
+export function parseTraceText(text: string): ParsedTrace {
+  return parseTrace(decodeTraceText(text));
+}
+
 function summarize(spans: RawSpan[]): TraceSummary {
   let toolCalls = 0;
   let llmCalls = 0;
