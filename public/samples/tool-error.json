@@ -1,0 +1,100 @@
+{
+  "spans": [
+    {
+      "span_id": "b1",
+      "parent_span_id": null,
+      "trace_id": "t-error-002",
+      "name": "support_agent.run",
+      "start_time": "2026-06-18T14:30:00.000Z",
+      "end_time": "2026-06-18T14:30:04.480Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "AGENT",
+        "input.value": "How do I reset my password?",
+        "output.value": "To reset your password, open Settings > Security > Reset password and follow the email link."
+      }
+    },
+    {
+      "span_id": "b2",
+      "parent_span_id": "b1",
+      "trace_id": "t-error-002",
+      "name": "llm.plan",
+      "start_time": "2026-06-18T14:30:00.100Z",
+      "end_time": "2026-06-18T14:30:01.200Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "claude-sonnet-4-6",
+        "llm.token_count.prompt": 200,
+        "llm.token_count.completion": 90,
+        "llm.cost.total": 0.0020,
+        "output.value": "Plan: search the live help center for the current password reset steps."
+      }
+    },
+    {
+      "span_id": "b3",
+      "parent_span_id": "b1",
+      "trace_id": "t-error-002",
+      "name": "tool.web_search",
+      "start_time": "2026-06-18T14:30:01.240Z",
+      "end_time": "2026-06-18T14:30:01.900Z",
+      "status_code": "ERROR",
+      "status_message": "HTTP 503 from search provider after 3 retries",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "web_search",
+        "tool.parameters": "{\"query\": \"reset password help center\"}"
+      }
+    },
+    {
+      "span_id": "b4",
+      "parent_span_id": "b1",
+      "trace_id": "t-error-002",
+      "name": "llm.replan",
+      "start_time": "2026-06-18T14:30:01.940Z",
+      "end_time": "2026-06-18T14:30:02.800Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "claude-sonnet-4-6",
+        "llm.token_count.prompt": 300,
+        "llm.token_count.completion": 70,
+        "llm.cost.total": 0.0026,
+        "input.value": "web_search failed with 503. Fall back to the internal knowledge base.",
+        "output.value": "Search is down; use the offline knowledge base instead."
+      }
+    },
+    {
+      "span_id": "b5",
+      "parent_span_id": "b1",
+      "trace_id": "t-error-002",
+      "name": "tool.kb_lookup",
+      "start_time": "2026-06-18T14:30:02.840Z",
+      "end_time": "2026-06-18T14:30:03.200Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "kb_lookup",
+        "tool.parameters": "{\"article\": \"password-reset\"}",
+        "output.value": "Settings > Security > Reset password > follow the emailed link."
+      }
+    },
+    {
+      "span_id": "b6",
+      "parent_span_id": "b1",
+      "trace_id": "t-error-002",
+      "name": "llm.answer",
+      "start_time": "2026-06-18T14:30:03.240Z",
+      "end_time": "2026-06-18T14:30:04.460Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "claude-sonnet-4-6",
+        "llm.token_count.prompt": 480,
+        "llm.token_count.completion": 120,
+        "llm.cost.total": 0.0038,
+        "output.value": "To reset your password, open Settings > Security > Reset password and follow the email link."
+      }
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "spans": [
+    {
+      "span_id": "a1",
+      "parent_span_id": null,
+      "trace_id": "t-research-001",
+      "name": "research_agent.run",
+      "start_time": "2026-06-18T10:00:00.000Z",
+      "end_time": "2026-06-18T10:00:06.010Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "AGENT",
+        "input.value": "What is the combined population of the three largest cities in Japan?",
+        "output.value": "Tokyo (13.96M), Yokohama (3.77M) and Osaka (2.75M) have a combined population of about 20.48 million."
+      }
+    },
+    {
+      "span_id": "a2",
+      "parent_span_id": "a1",
+      "trace_id": "t-research-001",
+      "name": "llm.plan",
+      "start_time": "2026-06-18T10:00:00.120Z",
+      "end_time": "2026-06-18T10:00:01.340Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "gpt-4o",
+        "llm.token_count.prompt": 210,
+        "llm.token_count.completion": 95,
+        "llm.cost.total": 0.0021,
+        "input.value": "User asks for combined population of Japan's three largest cities.",
+        "output.value": "Plan: (1) search for the three largest cities and their populations, (2) sum them, (3) answer."
+      }
+    },
+    {
+      "span_id": "a3",
+      "parent_span_id": "a1",
+      "trace_id": "t-research-001",
+      "name": "tool.web_search",
+      "start_time": "2026-06-18T10:00:01.380Z",
+      "end_time": "2026-06-18T10:00:03.120Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "web_search",
+        "tool.parameters": "{\"query\": \"largest cities in Japan by population\"}",
+        "output.value": "Tokyo 13.96M; Yokohama 3.77M; Osaka 2.75M; Nagoya 2.33M; Sapporo 1.97M"
+      }
+    },
+    {
+      "span_id": "a4",
+      "parent_span_id": "a3",
+      "trace_id": "t-research-001",
+      "name": "retriever.vector_search",
+      "start_time": "2026-06-18T10:00:01.420Z",
+      "end_time": "2026-06-18T10:00:03.080Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "RETRIEVER",
+        "input.value": "largest cities in Japan by population",
+        "retrieval.documents.count": 5,
+        "output.value": "5 documents retrieved from the web index"
+      }
+    },
+    {
+      "span_id": "a5",
+      "parent_span_id": "a1",
+      "trace_id": "t-research-001",
+      "name": "llm.extract",
+      "start_time": "2026-06-18T10:00:03.160Z",
+      "end_time": "2026-06-18T10:00:04.020Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "gpt-4o",
+        "llm.token_count.prompt": 540,
+        "llm.token_count.completion": 60,
+        "llm.cost.total": 0.0031,
+        "input.value": "Extract the top three cities and populations from the search results.",
+        "output.value": "Tokyo 13.96, Yokohama 3.77, Osaka 2.75 (millions)."
+      }
+    },
+    {
+      "span_id": "a6",
+      "parent_span_id": "a1",
+      "trace_id": "t-research-001",
+      "name": "tool.calculator",
+      "start_time": "2026-06-18T10:00:04.060Z",
+      "end_time": "2026-06-18T10:00:04.090Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "calculator",
+        "tool.parameters": "{\"expression\": \"13.96 + 3.77 + 2.75\"}",
+        "output.value": "20.48"
+      }
+    },
+    {
+      "span_id": "a7",
+      "parent_span_id": "a1",
+      "trace_id": "t-research-001",
+      "name": "llm.answer",
+      "start_time": "2026-06-18T10:00:04.130Z",
+      "end_time": "2026-06-18T10:00:06.000Z",
+      "status_code": "OK",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "gpt-4o",
+        "llm.token_count.prompt": 720,
+        "llm.token_count.completion": 140,
+        "llm.cost.total": 0.0048,
+        "input.value": "Write the final answer using the computed sum of 20.48 million.",
+        "output.value": "Tokyo, Yokohama and Osaka have a combined population of about 20.48 million."
+      }
+    }
+  ]
+}
