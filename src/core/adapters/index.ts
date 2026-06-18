@@ -1,10 +1,11 @@
 import type { LooseSpan } from "../openinference";
 import type { TraceAdapter } from "./types";
 import { otlpAdapter } from "./otlp";
+import { anthropicAdapter } from "./anthropic";
 import { nativeAdapter } from "./native";
 
 // More specific adapters go first; the native catch-all is last.
-export const ADAPTERS: TraceAdapter[] = [otlpAdapter, nativeAdapter];
+export const ADAPTERS: TraceAdapter[] = [otlpAdapter, anthropicAdapter, nativeAdapter];
 
 /** Detect the input format and flatten it to LooseSpan[]. */
 export function extractSpansAuto(json: unknown): LooseSpan[] {

@@ -13,6 +13,7 @@ const SAMPLES = [
   { file: "research-agent.json", label: "Research agent", hint: "7 spans · 3 LLM · 2 tools" },
   { file: "tool-error.json", label: "Tool error + recovery", hint: "6 spans · 1 error" },
   { file: "otlp-trace.json", label: "OpenTelemetry (OTLP)", hint: "4 spans · OTLP format" },
+  { file: "anthropic-log.json", label: "Claude (Anthropic) log", hint: "3 calls · 1 error" },
 ];
 
 export function Loader({ onLoad, onError, error }: Props) {
