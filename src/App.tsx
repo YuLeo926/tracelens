@@ -3,7 +3,7 @@ import type { ParsedTrace } from "./core/types";
 import { Loader } from "./components/Loader";
 import { Summary } from "./components/Summary";
 import { TraceTree } from "./components/TraceTree";
-import { SpanDetail } from "./components/SpanDetail";
+import { SpanDetail } from "./components/detail/SpanDetail";
 import { Legend } from "./components/Legend";
 
 function Logo() {
