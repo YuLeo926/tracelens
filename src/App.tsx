@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedTrace } from "./core/types";
+import { parseTrace } from "./core/parse";
 import { searchTrace, errorSpanIds, slowestSpanId } from "./core/search";
-import { encodeShare, shareUrl, shareSupported } from "./core/share";
+import { encodeShare, decodeShare, readShareHash, shareUrl, shareSupported } from "./core/share";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { Loader } from "./components/Loader";
 import { AppShell } from "./components/shell/AppShell";
@@ -42,6 +43,9 @@ export default function App() {
     setQuery("");
     setMatchIndex(0);
     setRawSource("");
+    if (window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
   };
 
   const search = useMemo(
@@ -128,6 +132,25 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // On first load, open a trace embedded in the URL hash (#t=...).
+  useEffect(() => {
+    const token = readShareHash(window.location.hash);
+    if (!token) return;
+    let cancelled = false;
+    decodeShare(token)
+      .then((payload) => {
+        if (cancelled) return;
+        onLoad(parseTrace(JSON.parse(payload.source)), payload.name, payload.source);
+      })
+      .catch(() => {
+        if (!cancelled) setError("This share link could not be opened.");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
