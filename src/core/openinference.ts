@@ -4,6 +4,7 @@
 // this is the single place where "what framework emitted this" is resolved.
 
 import type { RawSpan, SpanKind, SpanStatus } from "./types";
+import { extractSpansAuto } from "./adapters";
 
 const KIND_MAP: Record<string, SpanKind> = {
   AGENT: "agent",
@@ -142,13 +143,7 @@ export function normalizeSpan(raw: LooseSpan): RawSpan {
   };
 }
 
-/** Accepts an array of spans, { spans: [...] }, or { data: [...] }. */
+/** Detects the input format (OTLP, span array, { spans }, { data }) and flattens to LooseSpan[]. */
 export function extractSpans(json: unknown): LooseSpan[] {
-  if (Array.isArray(json)) return json as LooseSpan[];
-  if (json && typeof json === "object") {
-    const obj = json as Record<string, unknown>;
-    if (Array.isArray(obj.spans)) return obj.spans as LooseSpan[];
-    if (Array.isArray(obj.data)) return obj.data as LooseSpan[];
-  }
-  return [];
+  return extractSpansAuto(json);
 }
