@@ -48,3 +48,41 @@ describe("Codex end-to-end via parseTrace", () => {
     expect(agent.kind).toBe("llm");
   });
 });
+
+const ROLLOUT = [
+  { timestamp: "2026-06-15T12:59:51.565Z", type: "session_meta", payload: { id: "sess-1", cwd: "E:/proj" } },
+  { timestamp: "2026-06-15T12:59:51.598Z", type: "turn_context", payload: { model: "gpt-5.5" } },
+  { timestamp: "2026-06-15T12:59:59.386Z", type: "response_item", payload: { type: "function_call", name: "shell_command", arguments: '{"command":"ls"}', call_id: "call_1" } },
+  { timestamp: "2026-06-15T12:59:59.754Z", type: "response_item", payload: { type: "function_call_output", call_id: "call_1", output: "Exit code: 0\nOutput:\nsrc" } },
+  { timestamp: "2026-06-15T13:00:02.000Z", type: "response_item", payload: { type: "function_call", name: "shell_command", arguments: '{"command":"cat missing"}', call_id: "call_2" } },
+  { timestamp: "2026-06-15T13:00:02.300Z", type: "response_item", payload: { type: "function_call_output", call_id: "call_2", output: "Exit code: 1\ncat: missing: not found" } },
+  { timestamp: "2026-06-15T13:06:40.328Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Done." }] } },
+  { timestamp: "2026-06-15T13:06:40.477Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 20707, output_tokens: 330 } } } },
+];
+
+describe("codexAdapter — session rollout", () => {
+  it("detects the rollout shape", () => {
+    expect(codexAdapter.detect(ROLLOUT)).toBe(true);
+  });
+
+  it("pairs a command with its output and gives it a real duration", () => {
+    const t = parseTrace(ROLLOUT);
+    const ls = t.byId.get("call_1")!;
+    expect(ls.kind).toBe("tool");
+    expect(ls.input).toBe("ls");
+    expect(ls.output).toContain("src");
+    expect(ls.durationMs).toBeGreaterThan(0);
+    expect(ls.status).toBe("ok");
+  });
+
+  it("flags a non-zero exit code and maps model + tokens on the root", () => {
+    const t = parseTrace(ROLLOUT);
+    expect(t.byId.get("call_2")!.status).toBe("error");
+    expect(t.summary.errors).toBe(1);
+    expect(t.roots[0].name).toBe("codex.session");
+    expect(t.roots[0].model).toBe("gpt-5.5");
+    expect(t.roots[0].tokensIn).toBe(20707);
+    const msg = flatten(t.roots).find((n) => n.name === "assistant")!;
+    expect(msg.kind).toBe("llm");
+  });
+});
