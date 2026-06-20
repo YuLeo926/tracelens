@@ -185,7 +185,7 @@ export default function App() {
             active: activeView === "tree",
           }}
         >
-          <section className="min-h-0 overflow-hidden border-r border-border bg-panel">
+          <section className="flex min-h-0 flex-col overflow-hidden border-r border-border bg-panel">
             {activeView === "tree" && (
               <TreeView
                 trace={trace}

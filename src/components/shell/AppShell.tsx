@@ -25,7 +25,7 @@ export function AppShell({ activeView, onSelectView, label, summary, onReset, se
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar label={label} onReset={onReset} search={search} exportActions={exportActions} />
         <SummaryStrip summary={summary} />
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
           {children}
         </div>
       </main>
