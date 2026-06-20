@@ -201,7 +201,7 @@ export default function App() {
             {activeView === "flamegraph" && (
               <FlamegraphView trace={trace} selectedId={selectedId} onSelect={setSelectedId} />
             )}
-            {activeView === "diff" && <DiffView />}
+            {activeView === "diff" && <DiffView trace={trace} label={label} />}
           </section>
           <aside className="min-h-0 overflow-auto bg-bg">
             {selected ? (
