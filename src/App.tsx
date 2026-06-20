@@ -198,7 +198,9 @@ export default function App() {
                 query={query}
               />
             )}
-            {activeView === "flamegraph" && <FlamegraphView />}
+            {activeView === "flamegraph" && (
+              <FlamegraphView trace={trace} selectedId={selectedId} onSelect={setSelectedId} />
+            )}
             {activeView === "diff" && <DiffView />}
           </section>
           <aside className="min-h-0 overflow-auto bg-bg">

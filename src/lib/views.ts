@@ -14,7 +14,7 @@ export interface ViewDef {
 
 export const VIEWS: ViewDef[] = [
   { id: "tree", label: "Call tree", icon: "▤", status: "ready" },
-  { id: "flamegraph", label: "Flamegraph", icon: "▦", status: "soon" },
+  { id: "flamegraph", label: "Flamegraph", icon: "▦", status: "ready" },
   { id: "diff", label: "Diff", icon: "⇄", status: "soon" },
 ];
 
