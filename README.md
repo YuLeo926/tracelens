@@ -1,8 +1,8 @@
 # 🔍 Tracelens
 
-**A local-first, zero-backend viewer for AI agent traces.** Drop in an OpenInference / OTel GenAI trace and get a readable call tree with timings, tokens, cost, and errors — like DevTools for a single agent run.
+**A local-first, zero-backend debugger for AI agent traces.** Drop in a trace — OpenInference, OTel/OTLP, Codex, or Claude Code — and get a readable call tree with timings, tokens, cost, and errors. Search it, flamegraph it, diff two runs, share it by link — like DevTools for a single agent run.
 
-![license](https://img.shields.io/badge/license-MIT-E8A23D) ![types](https://img.shields.io/badge/TypeScript-strict-3DC9C0) ![backend](https://img.shields.io/badge/backend-none-8B7CF6) ![status](https://img.shields.io/badge/status-v0-A78BFA)
+![license](https://img.shields.io/badge/license-MIT-E8A23D) ![types](https://img.shields.io/badge/TypeScript-strict-3DC9C0) ![backend](https://img.shields.io/badge/backend-none-8B7CF6) ![status](https://img.shields.io/badge/status-v1-A78BFA)
 
 ---
 
@@ -14,15 +14,16 @@ The heavyweight observability platforms can show you this — but most of them w
 
 **Tracelens is the lightweight companion.** Open a trace, see everything, close the tab. No account, no server, no upload — the file never leaves your browser.
 
-## What it does (v0)
+## What it does
 
-- **Reads the emerging standard** — OpenInference attributes, with an OTel GenAI (`gen_ai.*`) fallback, so it is framework-agnostic by design.
+- **Reads many formats, auto-detected** — OpenInference / OTel GenAI, raw OpenTelemetry (OTLP) JSON, Codex (`codex exec --json` and saved session rollouts), Claude Code transcripts, and raw Anthropic Messages logs — as JSON or JSONL. Drop the file; Tracelens figures out the format.
 - **Call tree with an inline waterfall** — every span is colored by kind (LLM, tool, retriever, agent…) and shows where in the run it happened and how long it took.
-- **Roll-ups at a glance** — total duration, span count, LLM vs tool calls, tokens in/out, cost, and error count.
-- **Errors stand out** — failed spans are flagged in red and carry their status message.
-- **A detail panel for each span** — input, output, model, tokens, cost, and the raw attributes.
-- **Bundled sample traces** — run it and click one; nothing to set up.
-- **100% client-side.** Static build, works offline, nothing is uploaded.
+- **Search + jump** — filter the tree as you type (`⌘K`) across names, models, input/output, and jump straight to the next error or the slowest span.
+- **Flamegraph** — see where the time and the money went, weighted by duration, tokens, or cost.
+- **Diff two runs** — load a second trace and compare: a summary delta bar (regressions in red, improvements in green) over a merged tree that flags what changed, was added, or removed.
+- **Shareable export** — copy a self-loading link (the trace lives in the URL) or download the JSON; nothing is uploaded.
+- **Roll-ups, errors, and a detail panel** — total duration / tokens / cost / errors at a glance; failed spans flagged in red; per-span input, output, model, tokens, and raw attributes.
+- **Light & dark**, bundled sample traces, and **100% client-side** — static build, works offline, the file never leaves your browser.
 
 ## Quickstart
 
@@ -69,7 +70,7 @@ Tracelens accepts a JSON **array of spans**, or an object shaped like `{ "spans"
 }
 ```
 
-Times may be ISO strings, epoch milliseconds, or OTLP unix-nanoseconds. The recognized attributes (span kind, token counts, cost, model, input/output, tool name) live in [`src/core/openinference.ts`](src/core/openinference.ts) — adding support for another exporter is a few lines there. See [`public/samples/`](public/samples) for complete, working examples.
+Times may be ISO strings, epoch milliseconds, or OTLP unix-nanoseconds. **The format is auto-detected** — besides the native span array, Tracelens reads OpenTelemetry (OTLP) JSON, Codex `codex exec --json` and saved session rollouts (`~/.codex/sessions/…`), Claude Code transcripts (`~/.claude/projects/…`), and raw Anthropic Messages logs, as JSON or JSONL. Each format is one small file in [`src/core/adapters/`](src/core/adapters) (the per-attribute mapping lives in [`src/core/openinference.ts`](src/core/openinference.ts)); adding another is a few lines. See [`public/samples/`](public/samples) for complete, working examples.
 
 ## Architecture
 
@@ -77,36 +78,39 @@ The parsing core is deliberately separate from the UI: it is pure, dependency-fr
 
 ```mermaid
 flowchart LR
-  raw["Raw trace<br/>(OpenInference / OTel)"] --> norm["normalize<br/>openinference.ts"]
+  raw["Raw trace<br/>(OpenInference / OTLP / Codex / Claude Code)"] --> adapt["detect + flatten<br/>core/adapters/"]
+  adapt --> norm["normalize<br/>openinference.ts"]
   norm --> parse["build tree + summary<br/>parse.ts"]
-  parse --> tree["Call tree + waterfall"]
-  parse --> sum["Summary bar"]
-  parse --> detail["Span detail"]
+  parse --> views["Call tree · Flamegraph · Diff · Detail"]
 ```
 
 ```
 src/
 ├─ core/                 # framework-agnostic, no React, fully tested
-│  ├─ types.ts           #   the canonical span/tree/summary model
-│  ├─ openinference.ts   #   raw attributes  ->  canonical model
-│  ├─ parse.ts           #   flat spans      ->  tree + roll-up summary
-│  ├─ format.ts          #   duration / token / cost formatting
-│  └─ parse.test.ts      #   Vitest suite
-├─ lib/
-│  └─ kinds.ts           # the signature: span kind -> color
-└─ components/           # the viewer (tree, waterfall row, detail, loader, summary)
+│  ├─ types.ts           #   canonical span/tree/summary model
+│  ├─ adapters/          #   format detection: OTLP, Codex, Claude Code, native…
+│  ├─ openinference.ts   #   raw attributes -> canonical model
+│  ├─ parse.ts           #   spans -> tree + roll-up (JSON & JSONL aware)
+│  ├─ search.ts          #   filter + error/slowest jumps
+│  ├─ flame.ts           #   flamegraph aggregates + icicle layout
+│  ├─ diff.ts            #   align two runs into a merged diff
+│  ├─ share.ts           #   gzip + base64url share links
+│  └─ format.ts          #   duration / token / cost formatting
+├─ lib/                  # kinds (span kind -> color), view registry
+├─ theme/                # light/dark provider (token-driven)
+└─ components/           # shell · views (tree / flamegraph / diff) · detail · loader
 ```
 
 ## Roadmap
 
-**v0 — now.** Parse a trace, render the tree + inline waterfall, detail panel, bundled samples.
+**v0 — shipped.** Parse a trace, render the tree + inline waterfall, detail panel, bundled samples.
 
-**v1 — make it a debugger.**
-- Diff two runs side by side (catch regressions)
-- Token / cost flamegraph — where did the time and money go
-- Search across spans and jump straight to errors or loops
-- Shareable export: a self-contained HTML file or a URL-encoded trace, so a teammate can open a failing run with one click
-- Import adapters for Langfuse / LangSmith / Phoenix exports and raw OpenAI / Anthropic SDK logs
+**v1 — make it a debugger. ✅ shipped.**
+- ✅ Diff two runs side by side (catch regressions)
+- ✅ Token / cost flamegraph — where did the time and money go
+- ✅ Search across spans and jump straight to errors / the slowest call
+- ✅ Shareable export — a URL-encoded trace (and JSON download), so a teammate can open a failing run with one click
+- ✅ Import adapters — OTLP/OpenTelemetry, Codex (`exec --json` **and** saved session rollouts), and Claude (Messages logs **and** Claude Code transcripts), JSON or JSONL
 
 **v2 — make it a layer others build on.**
 - Publish the components as a headless, shadcn-style library to drop into any app
@@ -119,7 +123,7 @@ The name appears in exactly three places: the `name` field in `package.json`, th
 
 ## Contributing
 
-PRs welcome — the highest-leverage contributions are **new trace-format adapters** in `src/core/openinference.ts` and **sample traces** in `public/samples/`. Please run `npm test` before opening a PR.
+PRs welcome — the highest-leverage contributions are **new trace-format adapters** in [`src/core/adapters/`](src/core/adapters) (each is one self-contained file with a `detect` + a `toLooseSpans`) and **sample traces** in `public/samples/`. Please run `npm test` before opening a PR.
 
 ## License
 
