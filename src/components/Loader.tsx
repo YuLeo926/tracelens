@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { parseTraceText } from "../core/parse";
 import type { ParsedTrace } from "../core/types";
 import { ThemeToggle } from "./shell/ThemeToggle";
+import { TRACE_FILE_ACCEPT } from "./traceFileAccept";
 
 interface Props {
   onLoad: (trace: ParsedTrace, label: string, source: string) => void;
@@ -115,7 +116,7 @@ export function Loader({ onLoad, onError, error }: Props) {
           <span className="text-[12px] text-faint">or click to choose a .json file</span>
           <input
             type="file"
-            accept="application/json,.json"
+            accept={TRACE_FILE_ACCEPT}
             className="hidden"
             onChange={(e) => onFiles(e.target.files)}
           />

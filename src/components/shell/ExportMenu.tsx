@@ -5,6 +5,7 @@ export function ExportMenu({ actions }: { actions: ExportActions }) {
   const { onCopyLink, onDownloadJson, canShare } = actions;
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,9 +25,13 @@ export function ExportMenu({ actions }: { actions: ExportActions }) {
   }, [open]);
 
   const handleCopy = async () => {
-    await onCopyLink();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    const ok = await onCopyLink();
+    setCopied(ok);
+    setCopyFailed(!ok);
+    setTimeout(() => {
+      setCopied(false);
+      setCopyFailed(false);
+    }, 1500);
   };
 
   return (
@@ -53,7 +58,7 @@ export function ExportMenu({ actions }: { actions: ExportActions }) {
             title={canShare ? "" : "Sharing needs a newer browser"}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-text hover:bg-panel-2 disabled:opacity-40"
           >
-            🔗 {copied ? "Copied!" : "Copy share link"}
+            🔗 {copied ? "Copied!" : copyFailed ? "Copy failed" : "Copy share link"}
           </button>
           <button
             type="button"

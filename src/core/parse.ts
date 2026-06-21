@@ -25,6 +25,7 @@ export function parseTrace(json: unknown): ParsedTrace {
       "Spans were found but none had a span id. Check the trace format.",
     );
   }
+  validateSpans(spans);
 
   const byId = new Map<string, RunNode>();
   for (const span of spans) {
@@ -61,19 +62,38 @@ export function decodeTraceText(text: string): unknown {
     return JSON.parse(text);
   } catch {
     const objs: unknown[] = [];
-    for (const line of text.split(/\r?\n/)) {
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const t = line.trim();
       if (!t) continue;
       try {
         objs.push(JSON.parse(t));
-      } catch {
-        /* skip non-JSON lines */
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "invalid JSON";
+        throw new TraceParseError(`Invalid JSONL on line ${i + 1}: ${message}`);
       }
     }
     if (objs.length === 0) {
       throw new TraceParseError("That file is not valid JSON or JSONL.");
     }
     return objs;
+  }
+}
+
+function validateSpans(spans: RawSpan[]): void {
+  const seen = new Set<string>();
+  for (const span of spans) {
+    if (seen.has(span.spanId)) {
+      throw new TraceParseError(`Duplicate span id "${span.spanId}".`);
+    }
+    seen.add(span.spanId);
+    if (!Number.isFinite(span.startMs)) {
+      throw new TraceParseError(`Span "${span.spanId}" has invalid start time.`);
+    }
+    if (!Number.isFinite(span.endMs)) {
+      throw new TraceParseError(`Span "${span.spanId}" has invalid end time.`);
+    }
   }
 }
 

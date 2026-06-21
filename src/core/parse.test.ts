@@ -53,6 +53,23 @@ describe("parseTrace", () => {
     expect(() => parseTrace([])).toThrow(TraceParseError);
     expect(() => parseTrace({})).toThrow(/No spans found/);
   });
+
+  it("rejects duplicate span ids before building the tree", () => {
+    expect(() =>
+      parseTrace([
+        { span_id: "dup", name: "first", start_time: 0, end_time: 1, attributes: {} },
+        { span_id: "dup", name: "second", start_time: 1, end_time: 2, attributes: {} },
+      ]),
+    ).toThrow(/Duplicate span id "dup"/);
+  });
+
+  it("rejects spans with invalid timing fields", () => {
+    expect(() =>
+      parseTrace([
+        { span_id: "bad-time", name: "step", start_time: "not-a-date", end_time: 1, attributes: {} },
+      ]),
+    ).toThrow(/invalid start time/);
+  });
 });
 
 describe("toMs", () => {
@@ -86,6 +103,11 @@ describe("decodeTraceText", () => {
       { type: "a" },
       { type: "b" },
     ]);
+  });
+  it("rejects malformed non-empty JSONL lines instead of dropping them", () => {
+    expect(() => decodeTraceText('{"type":"a"}\nnot json\n{"type":"b"}')).toThrow(
+      /line 2/,
+    );
   });
   it("throws on text that is neither JSON nor JSONL", () => {
     expect(() => decodeTraceText("not json at all")).toThrow(TraceParseError);

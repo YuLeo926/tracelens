@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedTrace } from "./core/types";
 import { parseTraceText } from "./core/parse";
 import { searchTrace, errorSpanIds, slowestSpanId } from "./core/search";
-import { encodeShare, decodeShare, readShareHash, shareUrl, shareSupported } from "./core/share";
+import { decodeShare, readShareHash, shareSupported } from "./core/share";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { Loader } from "./components/Loader";
 import { AppShell } from "./components/shell/AppShell";
+import { copyShareLinkToClipboard } from "./components/shell/exportActions";
 import { TreeView } from "./components/views/TreeView/TreeView";
 import { FlamegraphView } from "./components/views/FlamegraphView";
 import { DiffView } from "./components/views/DiffView";
@@ -100,14 +101,12 @@ export default function App() {
   const canShare = shareSupported();
 
   const copyShareLink = useCallback(async () => {
-    if (!rawSource) return;
-    try {
-      const encoded = await encodeShare({ name: label, source: rawSource });
-      const url = shareUrl(window.location.origin + window.location.pathname, encoded);
-      await navigator.clipboard.writeText(url);
-    } catch {
-      /* clipboard or compression unavailable — Copy is disabled when unsupported */
-    }
+    return copyShareLinkToClipboard({
+      rawSource,
+      label,
+      baseUrl: window.location.origin + window.location.pathname,
+      writeText: (text) => navigator.clipboard.writeText(text),
+    });
   }, [rawSource, label]);
 
   const downloadJson = useCallback(() => {

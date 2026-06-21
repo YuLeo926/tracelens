@@ -4,6 +4,7 @@ import { parseTraceText } from "../../core/parse";
 import { diffTraces, flattenDiff, type DiffStat } from "../../core/diff";
 import { kindColor } from "../../lib/kinds";
 import { formatDuration, formatTokens, formatCost } from "../../core/format";
+import { TRACE_FILE_ACCEPT } from "../traceFileAccept";
 
 interface Props {
   trace: ParsedTrace;
@@ -100,7 +101,7 @@ export function DiffView({ trace, label }: Props) {
           <span className="text-[12px] text-faint">drop a second trace here, or click to choose</span>
           <input
             type="file"
-            accept="application/json,.json,.jsonl"
+            accept={TRACE_FILE_ACCEPT}
             className="hidden"
             onChange={(e) => onFiles(e.target.files)}
           />
