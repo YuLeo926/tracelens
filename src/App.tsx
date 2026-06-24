@@ -12,6 +12,12 @@ import { FlamegraphView } from "./components/views/FlamegraphView";
 import { DiffView } from "./components/views/DiffView";
 import { SpanDetail } from "./components/detail/SpanDetail";
 import { DEFAULT_VIEW, type ViewId } from "./lib/views";
+import { useLiveWatch } from "./hooks/useLiveWatch";
+import { pickFolder } from "./lib/folderWatch";
+import { latestSpanId } from "./core/live";
+import { LiveBar } from "./components/live/LiveBar";
+import { BackToLivePill } from "./components/live/BackToLivePill";
+import type { LiveUpdate } from "./lib/liveEngine";
 
 export default function App() {
   const [trace, setTrace] = useState<ParsedTrace | null>(null);
@@ -22,6 +28,10 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [matchIndex, setMatchIndex] = useState(0);
   const [rawSource, setRawSource] = useState("");
+  const [live, setLive] = useState(false);
+  const [following, setFollowing] = useState(true);
+  const [displayedFile, setDisplayedFile] = useState("");
+  const [pendingRun, setPendingRun] = useState<LiveUpdate | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const onLoad = (t: ParsedTrace, lbl: string, source: string) => {
@@ -35,7 +45,52 @@ export default function App() {
     setMatchIndex(0);
   };
 
+  const onLiveUpdate = useCallback(
+    (u: LiveUpdate) => {
+      setTrace(u.trace);
+      setError(null);
+      if (following) {
+        // Live-follow: show this run, jump to the newest step.
+        setLabel(u.label);
+        setRawSource(u.source);
+        setDisplayedFile(u.label);
+        setSelectedId(latestSpanId(u.trace.roots));
+        setPendingRun(null);
+      } else if (u.label === displayedFile) {
+        // Same run growing while paused: keep selection/scroll, refresh data.
+        setLabel(u.label);
+        setRawSource(u.source);
+      } else {
+        // A newer run arrived while paused: advertise it, don't steal the view.
+        setPendingRun(u);
+      }
+    },
+    [following, displayedFile],
+  );
+
+  const liveWatch = useLiveWatch({ onUpdate: onLiveUpdate });
+
+  const startLive = useCallback(async () => {
+    const dir = await pickFolder();
+    if (!dir) return;
+    setLive(true);
+    setFollowing(true);
+    setPendingRun(null);
+    setQuery("");
+    setMatchIndex(0);
+    setActiveView("tree");
+    liveWatch.start(dir);
+  }, [liveWatch]);
+
+  const stopLive = useCallback(() => {
+    liveWatch.stop();
+    setLive(false);
+    setFollowing(true);
+    setPendingRun(null);
+  }, [liveWatch]);
+
   const reset = () => {
+    stopLive();
     setTrace(null);
     setSelectedId(null);
     setError(null);
@@ -152,6 +207,33 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const goLive = useCallback(() => {
+    setFollowing(true);
+    if (pendingRun) {
+      const u = pendingRun;
+      setTrace(u.trace);
+      setLabel(u.label);
+      setRawSource(u.source);
+      setDisplayedFile(u.label);
+      setSelectedId(latestSpanId(u.trace.roots));
+      setPendingRun(null);
+    } else if (trace) {
+      setSelectedId(latestSpanId(trace.roots));
+    }
+  }, [pendingRun, trace]);
+
+  const onSpanSelect = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      if (live) setFollowing(false);
+    },
+    [live],
+  );
+
+  const onUserScroll = useCallback(() => {
+    if (live && following) setFollowing(false);
+  }, [live, following]);
+
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
   const filtering = query.trim().length > 0;
   const currentMatchId =
@@ -160,7 +242,7 @@ export default function App() {
   return (
     <ThemeProvider>
       {!trace ? (
-        <Loader onLoad={onLoad} onError={setError} error={error} />
+        <Loader onLoad={onLoad} onError={setError} error={error} onStartLive={startLive} />
       ) : (
         <AppShell
           activeView={activeView}
@@ -184,23 +266,36 @@ export default function App() {
             active: activeView === "tree",
           }}
         >
-          <section className="flex min-h-0 flex-col overflow-hidden border-r border-border bg-panel">
+          <section className="relative flex min-h-0 flex-col overflow-hidden border-r border-border bg-panel">
+            {live && (
+              <LiveBar
+                state={liveWatch.state}
+                folderName={liveWatch.folderName}
+                currentFile={liveWatch.currentFile}
+                onStop={stopLive}
+              />
+            )}
             {activeView === "tree" && (
               <TreeView
                 trace={trace}
                 selectedId={selectedId}
-                onSelect={setSelectedId}
+                onSelect={onSpanSelect}
                 filtering={filtering}
                 visibleIds={search?.visibleIds ?? null}
                 matchIds={search?.matchIds ?? null}
                 currentMatchId={currentMatchId}
                 query={query}
+                followId={live && following ? selectedId : null}
+                onUserScroll={onUserScroll}
               />
             )}
             {activeView === "flamegraph" && (
-              <FlamegraphView trace={trace} selectedId={selectedId} onSelect={setSelectedId} />
+              <FlamegraphView trace={trace} selectedId={selectedId} onSelect={onSpanSelect} />
             )}
             {activeView === "diff" && <DiffView trace={trace} label={label} />}
+            {live && !following && (
+              <BackToLivePill newRun={pendingRun !== null} onClick={goLive} />
+            )}
           </section>
           <aside className="min-h-0 overflow-auto bg-bg">
             {selected ? (
