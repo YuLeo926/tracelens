@@ -44,7 +44,7 @@ describe("createLiveWatcher", () => {
     expect(onUpdate).toHaveBeenCalledTimes(2);
   });
 
-  it("swallows a parse failure and keeps the last good state", async () => {
+  it("swallows parse failures, keeps the last good state, and flags trouble only when sustained", async () => {
     const { source, state } = fakeSource({
       newest: { name: "run.jsonl", lastModified: 1 },
       files: { "run.jsonl": { lastModified: 1, text: TRACE("a") } },
@@ -54,11 +54,20 @@ describe("createLiveWatcher", () => {
     const w = createLiveWatcher(source, { onUpdate, onEmpty: vi.fn(), onTrouble, onRecovered: vi.fn() });
     await w.init();
 
-    // Half-written: newer mtime but malformed text.
+    // One half-written read (newer mtime, malformed text): swallowed, last good
+    // retained, and NOT yet flagged as trouble — normal mid-write jitter.
     state.files["run.jsonl"] = { lastModified: 2, text: "{ half-written" };
     await expect(w.fastTick()).resolves.toBeUndefined(); // does not throw
     expect(onUpdate).toHaveBeenCalledTimes(1); // still just the init emit
+    expect(onTrouble).not.toHaveBeenCalled();
+
+    // Two more consecutive failures (new mtimes) cross the threshold -> trouble.
+    state.files["run.jsonl"] = { lastModified: 3, text: "{ still bad" };
+    await w.fastTick();
+    state.files["run.jsonl"] = { lastModified: 4, text: "{ still bad" };
+    await w.fastTick();
     expect(onTrouble).toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledTimes(1); // never re-emitted on failure
   });
 
   it("switches to a newer run file on a slow tick", async () => {

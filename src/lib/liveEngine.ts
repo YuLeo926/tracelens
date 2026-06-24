@@ -50,11 +50,14 @@ export function createLiveWatcher(source: LiveSource, cb: LiveCallbacks): LiveWa
       cb.onUpdate({ trace, label: name, source: text });
       return true;
     } catch {
+      // Best-effort: a parse failure is usually a half-written read. Swallow it,
+      // keep the last good render, and only flag trouble once failures are
+      // sustained (>= threshold) so normal mid-write jitter doesn't flap the UI.
       failures += 1;
       if (failures >= TROUBLE_THRESHOLD && !troubled) {
         troubled = true;
       }
-      cb.onTrouble(failures);
+      if (troubled) cb.onTrouble(failures);
       return false;
     }
   };
