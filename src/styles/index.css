@@ -83,3 +83,8 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
