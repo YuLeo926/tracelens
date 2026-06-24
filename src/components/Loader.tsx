@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { parseTraceText } from "../core/parse";
 import type { ParsedTrace } from "../core/types";
+import { supportsFolderWatch } from "../lib/folderWatch";
 import { ThemeToggle } from "./shell/ThemeToggle";
 import { TRACE_FILE_ACCEPT } from "./traceFileAccept";
 
@@ -8,6 +9,7 @@ interface Props {
   onLoad: (trace: ParsedTrace, label: string, source: string) => void;
   onError: (message: string) => void;
   error?: string | null;
+  onStartLive?: () => void;
 }
 
 const SAMPLES = [
@@ -18,7 +20,7 @@ const SAMPLES = [
   { file: "codex-session.jsonl", label: "Codex exec --json", hint: "4 steps · 1 failed" },
 ];
 
-export function Loader({ onLoad, onError, error }: Props) {
+export function Loader({ onLoad, onError, error, onStartLive }: Props) {
   const [dragging, setDragging] = useState(false);
 
   const ingest = useCallback(
@@ -121,6 +123,17 @@ export function Loader({ onLoad, onError, error }: Props) {
             onChange={(e) => onFiles(e.target.files)}
           />
         </label>
+
+        {onStartLive && supportsFolderWatch() && (
+          <button
+            type="button"
+            onClick={onStartLive}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-panel px-6 py-3 text-sm text-text hover:border-accent"
+          >
+            📡 Watch a folder (live)
+            <span className="text-[12px] text-faint">— follow a run as it happens</span>
+          </button>
+        )}
 
         <div className="flex w-full flex-col gap-2">
           <span className="text-[11px] uppercase tracking-wider text-faint">or open a sample</span>
