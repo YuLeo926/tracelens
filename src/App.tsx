@@ -239,10 +239,17 @@ export default function App() {
   const currentMatchId =
     matchCount > 0 ? (search?.orderedMatchIds[matchIndex] ?? null) : null;
 
+  // Before the first live trace arrives there is no AppShell (hence no LiveBar),
+  // so an empty-folder pick would otherwise give no feedback. Surface it here.
+  const loaderError =
+    live && !trace && liveWatch.state === "empty"
+      ? "No session files (.json / .jsonl) found in that folder. It will start as soon as one appears."
+      : error;
+
   return (
     <ThemeProvider>
       {!trace ? (
-        <Loader onLoad={onLoad} onError={setError} error={error} onStartLive={startLive} />
+        <Loader onLoad={onLoad} onError={setError} error={loaderError} onStartLive={startLive} />
       ) : (
         <AppShell
           activeView={activeView}
