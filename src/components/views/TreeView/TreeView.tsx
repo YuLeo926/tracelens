@@ -13,10 +13,13 @@ interface Props {
   matchIds: Set<string> | null;
   currentMatchId: string | null;
   query: string;
+  followId?: string | null;
+  onUserScroll?: () => void;
 }
 
 export function TreeView({
   trace, selectedId, onSelect, filtering, visibleIds, matchIds, currentMatchId, query,
+  followId, onUserScroll,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const { startMs, durationMs } = trace.summary;
@@ -41,10 +44,21 @@ export function TreeView({
     el?.scrollIntoView({ block: "nearest" });
   }, [currentMatchId]);
 
+  useEffect(() => {
+    if (!followId) return;
+    const el = containerRef.current?.querySelector(`[data-span-id="${followId}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [followId]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <TimeAxis durationMs={durationMs} />
-      <div ref={containerRef} className="min-h-0 flex-1 overflow-auto py-1">
+      <div
+        ref={containerRef}
+        className="min-h-0 flex-1 overflow-auto py-1"
+        onWheel={onUserScroll}
+        onTouchMove={onUserScroll}
+      >
         {rows.length === 0 ? (
           <div className="px-4 py-3 text-[12px] text-muted">No spans match "{query}".</div>
         ) : (
