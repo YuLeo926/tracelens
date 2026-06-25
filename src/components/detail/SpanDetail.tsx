@@ -1,4 +1,5 @@
 import type { RunNode } from "../../core/types";
+import type { Annotation, StoredAnnotation } from "../../core/annotations";
 import { KindBadge } from "./KindBadge";
 import { formatDuration, formatTokens, formatCost, formatClock } from "../../core/format";
 
@@ -33,7 +34,56 @@ function Block({ label, body }: { label: string; body?: string }) {
   );
 }
 
-export function SpanDetail({ node }: { node: RunNode }) {
+function AnnotationControl({
+  annotation, onAnnotate, knownTags,
+}: {
+  annotation?: StoredAnnotation;
+  onAnnotate: (a: Annotation) => void;
+  knownTags: string[];
+}) {
+  const verdict = annotation?.verdict;
+  const tag = annotation?.tag ?? "";
+  const note = annotation?.note ?? "";
+  const update = (patch: Partial<Annotation>) => onAnnotate({ verdict, tag, note, ...patch });
+  const btn = (active: boolean) =>
+    `rounded border px-2 py-1 text-sm ${active ? "border-accent bg-elev" : "border-border hover:border-accent"}`;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-panel p-3">
+      <span className="text-[10px] uppercase tracking-wider text-faint">Annotation</span>
+      <div className="flex gap-2">
+        <button type="button" className={btn(verdict === "good")} onClick={() => update({ verdict: verdict === "good" ? undefined : "good" })}>👍</button>
+        <button type="button" className={btn(verdict === "bad")} onClick={() => update({ verdict: verdict === "bad" ? undefined : "bad" })}>👎</button>
+      </div>
+      <input
+        list="tracelens-ann-tags"
+        value={tag}
+        onChange={(e) => update({ tag: e.target.value })}
+        placeholder="tag (e.g. hallucination)"
+        className="rounded border border-border bg-bg px-2 py-1 text-[13px] text-text outline-none focus:border-accent"
+      />
+      <datalist id="tracelens-ann-tags">
+        {knownTags.map((t) => <option key={t} value={t} />)}
+      </datalist>
+      <textarea
+        value={note}
+        onChange={(e) => update({ note: e.target.value })}
+        placeholder="note…"
+        rows={2}
+        className="resize-y rounded border border-border bg-bg px-2 py-1 text-[13px] text-text outline-none focus:border-accent"
+      />
+    </div>
+  );
+}
+
+export function SpanDetail({
+  node, annotation, onAnnotate, knownTags = [],
+}: {
+  node: RunNode;
+  annotation?: StoredAnnotation;
+  onAnnotate?: (a: Annotation) => void;
+  knownTags?: string[];
+}) {
   const otherAttrs = Object.entries(node.attributes).filter(([k]) => !HANDLED_KEYS.includes(k));
   const isError = node.status === "error";
 
@@ -56,6 +106,10 @@ export function SpanDetail({ node }: { node: RunNode }) {
         </div>
         <h2 className="text-base font-semibold text-text">{node.name}</h2>
       </div>
+
+      {onAnnotate && (
+        <AnnotationControl annotation={annotation} onAnnotate={onAnnotate} knownTags={knownTags} />
+      )}
 
       {isError && node.statusMessage && (
         <div
