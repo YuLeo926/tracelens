@@ -13,11 +13,13 @@ import { DiffView } from "./components/views/DiffView";
 import { SpanDetail } from "./components/detail/SpanDetail";
 import { DEFAULT_VIEW, type ViewId } from "./lib/views";
 import { useLiveWatch } from "./hooks/useLiveWatch";
+import { useConversations } from "./hooks/useConversations";
 import { pickFolder } from "./lib/folderWatch";
 import { latestSpanId } from "./core/live";
 import { LiveBar } from "./components/live/LiveBar";
 import { LiveStandby } from "./components/live/LiveStandby";
 import { BackToLivePill } from "./components/live/BackToLivePill";
+import { ConversationList } from "./components/live/ConversationList";
 import type { LiveUpdate } from "./lib/liveEngine";
 
 export default function App() {
@@ -29,11 +31,15 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [matchIndex, setMatchIndex] = useState(0);
   const [rawSource, setRawSource] = useState("");
-  const [live, setLive] = useState(false);
+  const [folderDir, setFolderDir] = useState<FileSystemDirectoryHandle | null>(null);
+  const [folderView, setFolderView] = useState<"list" | "trace">("list");
   const [following, setFollowing] = useState(true);
   const [displayedFile, setDisplayedFile] = useState("");
   const [pendingRun, setPendingRun] = useState<LiveUpdate | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const convo = useConversations(folderDir);
+  const live = folderDir !== null && folderView === "trace";
 
   const onLoad = (t: ParsedTrace, lbl: string, source: string) => {
     setTrace(t);
@@ -51,18 +57,15 @@ export default function App() {
       setTrace(u.trace);
       setError(null);
       if (following) {
-        // Live-follow: show this run, jump to the newest step.
         setLabel(u.label);
         setRawSource(u.source);
         setDisplayedFile(u.label);
         setSelectedId(latestSpanId(u.trace.roots));
         setPendingRun(null);
       } else if (u.label === displayedFile) {
-        // Same run growing while paused: keep selection/scroll, refresh data.
         setLabel(u.label);
         setRawSource(u.source);
       } else {
-        // A newer run arrived while paused: advertise it, don't steal the view.
         setPendingRun(u);
       }
     },
@@ -71,27 +74,51 @@ export default function App() {
 
   const liveWatch = useLiveWatch({ onUpdate: onLiveUpdate });
 
-  const startLive = useCallback(async () => {
-    const dir = await pickFolder();
-    if (!dir) return;
-    setLive(true);
+  // Clear trace-view state before opening a different conversation.
+  const resetTraceState = useCallback(() => {
+    setTrace(null);
+    setSelectedId(null);
     setFollowing(true);
     setPendingRun(null);
+    setDisplayedFile("");
     setQuery("");
     setMatchIndex(0);
     setActiveView("tree");
-    liveWatch.followNewest(dir);
-  }, [liveWatch]);
+  }, []);
 
-  const stopLive = useCallback(() => {
+  const openFolder = useCallback(async () => {
+    const dir = await pickFolder();
+    if (!dir) return;
+    setFolderDir(dir);
+    setFolderView("list");
+  }, []);
+
+  const openConversation = useCallback(
+    (name: string) => {
+      if (!folderDir) return;
+      resetTraceState();
+      setFolderView("trace");
+      liveWatch.watchFile(folderDir, name);
+    },
+    [folderDir, liveWatch, resetTraceState],
+  );
+
+  const followNewest = useCallback(() => {
+    if (!folderDir) return;
+    resetTraceState();
+    setFolderView("trace");
+    liveWatch.followNewest(folderDir);
+  }, [folderDir, liveWatch, resetTraceState]);
+
+  const backToList = useCallback(() => {
     liveWatch.stop();
-    setLive(false);
-    setFollowing(true);
-    setPendingRun(null);
+    setFolderView("list");
   }, [liveWatch]);
 
   const reset = () => {
-    stopLive();
+    liveWatch.stop();
+    setFolderDir(null);
+    setFolderView("list");
     setTrace(null);
     setSelectedId(null);
     setError(null);
@@ -100,6 +127,9 @@ export default function App() {
     setQuery("");
     setMatchIndex(0);
     setRawSource("");
+    setFollowing(true);
+    setPendingRun(null);
+    setDisplayedFile("");
     if (window.location.hash) {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
     }
@@ -242,17 +272,25 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      {!trace ? (
+      {folderDir && folderView === "list" ? (
+        <ConversationList
+          folderName={folderDir.name}
+          conversations={convo.conversations}
+          loading={convo.loading}
+          error={convo.error}
+          onOpen={openConversation}
+          onFollowNewest={followNewest}
+          onClose={reset}
+        />
+      ) : !trace ? (
         live ? (
-          // Live mode active but no trace parsed yet — always show status so a
-          // folder pick never looks like "nothing happened".
           <LiveStandby
             state={liveWatch.state}
             folderName={liveWatch.folderName}
-            onStop={stopLive}
+            onStop={backToList}
           />
         ) : (
-          <Loader onLoad={onLoad} onError={setError} error={error} onStartLive={startLive} />
+          <Loader onLoad={onLoad} onError={setError} error={error} onStartLive={openFolder} />
         )
       ) : (
         <AppShell
@@ -283,7 +321,7 @@ export default function App() {
                 state={liveWatch.state}
                 folderName={liveWatch.folderName}
                 currentFile={liveWatch.currentFile}
-                onStop={stopLive}
+                onStop={backToList}
               />
             )}
             {activeView === "tree" && (
