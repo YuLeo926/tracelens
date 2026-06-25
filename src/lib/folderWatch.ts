@@ -81,23 +81,54 @@ async function collect(
   }
 }
 
+/** Resolve a relative path ("2026/06/25/rollout-x.jsonl") to a file handle. */
+async function resolveFileHandle(
+  dir: FileSystemDirectoryHandle,
+  relPath: string,
+): Promise<FileSystemFileHandle | null> {
+  const parts = relPath.split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+  let d = dir as unknown as {
+    getDirectoryHandle(name: string): Promise<FileSystemDirectoryHandle>;
+    getFileHandle(name: string): Promise<FileSystemFileHandle>;
+  };
+  try {
+    for (let i = 0; i < parts.length - 1; i++) {
+      d = (await d.getDirectoryHandle(parts[i])) as unknown as typeof d;
+    }
+    return await d.getFileHandle(parts[parts.length - 1]);
+  } catch {
+    return null;
+  }
+}
+
 /** Build a LiveSource backed by a picked directory handle. */
 export function createFolderSource(dir: FileSystemDirectoryHandle): LiveSource {
-  let handles = new Map<string, FileSystemFileHandle>();
+  const handles = new Map<string, FileSystemFileHandle>();
 
   return {
     async listCandidates() {
       const next = new Map<string, FileSystemFileHandle>();
       const meta: Array<{ name: string; lastModified: number }> = [];
       await collect(dir, "", 0, next, meta);
-      handles = next;
+      handles.clear();
+      for (const [k, v] of next) handles.set(k, v);
       // Newest first; ties broken by name (desc) for stable ordering.
       meta.sort((a, b) => b.lastModified - a.lastModified || (a.name > b.name ? -1 : 1));
       return meta;
     },
 
+    // Resolve the handle directly so read works in locked mode too (where
+    // listCandidates may never have run to populate the handle cache).
     async read(name) {
-      const handle = handles.get(name);
+      let handle = handles.get(name);
+      if (!handle) {
+        const resolved = await resolveFileHandle(dir, name);
+        if (resolved) {
+          handle = resolved;
+          handles.set(name, resolved);
+        }
+      }
       if (!handle) return null;
       try {
         const file = await handle.getFile();
