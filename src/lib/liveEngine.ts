@@ -94,28 +94,45 @@ export function createLiveWatcher(source: LiveSource, cb: LiveCallbacks): LiveWa
     if (failures >= TROUBLE_THRESHOLD) cb.onStatus("stalled");
   };
 
+  // Reading + parsing a large rollout can take longer than the tick interval.
+  // Skip a tick if the previous one is still running so reads never pile up.
+  let busy = false;
+  const guard = async (fn: () => Promise<void>): Promise<void> => {
+    if (busy) return;
+    busy = true;
+    try {
+      await fn();
+    } finally {
+      busy = false;
+    }
+  };
+
   return {
-    async init() {
-      cb.onStatus("scanning");
-      await adoptNewestParseable(false);
+    init() {
+      return guard(async () => {
+        cb.onStatus("scanning");
+        await adoptNewestParseable(false);
+      });
     },
 
-    async fastTick() {
-      if (!current) return; // discovery happens on the slow tick
-      const file = await source.read(current);
-      if (!file) {
-        noteFailure();
-        return;
-      }
-      if (file.lastModified === lastMtime) return; // no change
-      const trace = parse(file.text);
-      if (trace) emit(current, file.lastModified, file.text, trace);
-      else noteFailure();
+    fastTick() {
+      return guard(async () => {
+        if (!current) return; // discovery happens on the slow tick
+        const file = await source.read(current);
+        if (!file) {
+          noteFailure();
+          return;
+        }
+        if (file.lastModified === lastMtime) return; // no change
+        const trace = parse(file.text);
+        if (trace) emit(current, file.lastModified, file.text, trace);
+        else noteFailure();
+      });
     },
 
-    async slowTick() {
+    slowTick() {
       // No current yet -> keep looking. Otherwise see if a newer run appeared.
-      await adoptNewestParseable(current !== null);
+      return guard(() => adoptNewestParseable(current !== null));
     },
 
     currentFile() {
