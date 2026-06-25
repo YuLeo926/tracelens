@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createLiveWatcher, type LiveSource } from "./liveEngine";
+import { createLiveWatcher, type LiveSource, type LiveStatus } from "./liveEngine";
 
 /** A valid single-trace JSON string with one span per id. */
 const TRACE = (...ids: string[]) =>
@@ -7,94 +7,133 @@ const TRACE = (...ids: string[]) =>
     ids.map((id, i) => ({ span_id: id, name: id, start_time: i, end_time: i + 1, attributes: {} })),
   );
 
-/** A scripted source: read() returns whatever readState[name] currently holds. */
-function fakeSource(initial: {
-  newest: { name: string; lastModified: number } | null;
+/** Valid JSON that is NOT a trace (no spans) — parseTraceText throws on this. */
+const NOT_TRACE = '{"models":["a","b"],"cached_at":123}';
+
+/** A scripted source. listCandidates returns newest-first; read looks up by name. */
+function fakeSource(opts: {
+  candidates: Array<{ name: string; lastModified: number }>;
   files: Record<string, { lastModified: number; text: string }>;
 }) {
-  const state = { ...initial };
+  const state = { candidates: [...opts.candidates], files: { ...opts.files } };
   const source: LiveSource = {
-    scanNewest: async () => state.newest,
+    listCandidates: async () =>
+      [...state.candidates].sort(
+        (a, b) => b.lastModified - a.lastModified || (a.name > b.name ? -1 : 1),
+      ),
     read: async (name) => state.files[name] ?? null,
   };
   return { source, state };
 }
 
-describe("createLiveWatcher", () => {
-  it("emits a parsed trace on init and on content change", async () => {
-    const { source, state } = fakeSource({
-      newest: { name: "run.jsonl", lastModified: 1 },
-      files: { "run.jsonl": { lastModified: 1, text: TRACE("a") } },
-    });
-    const onUpdate = vi.fn();
-    const w = createLiveWatcher(source, { onUpdate, onEmpty: vi.fn(), onTrouble: vi.fn(), onRecovered: vi.fn() });
+function harness(opts: Parameters<typeof fakeSource>[0]) {
+  const { source, state } = fakeSource(opts);
+  const onUpdate = vi.fn();
+  const statuses: LiveStatus[] = [];
+  const w = createLiveWatcher(source, { onUpdate, onStatus: (s) => statuses.push(s) });
+  return { w, state, onUpdate, statuses, lastStatus: () => statuses[statuses.length - 1] };
+}
 
+describe("createLiveWatcher", () => {
+  it("adopts the newest PARSEABLE file, skipping a newer non-trace file", async () => {
+    const { w, onUpdate, lastStatus } = harness({
+      candidates: [
+        { name: "models_cache.json", lastModified: 10 },
+        { name: "rollout.jsonl", lastModified: 5 },
+      ],
+      files: {
+        "models_cache.json": { lastModified: 10, text: NOT_TRACE },
+        "rollout.jsonl": { lastModified: 5, text: TRACE("a") },
+      },
+    });
     await w.init();
     expect(onUpdate).toHaveBeenCalledTimes(1);
-    expect(onUpdate.mock.calls[0][0].label).toBe("run.jsonl");
+    expect(onUpdate.mock.calls[0][0].label).toBe("rollout.jsonl");
     expect(onUpdate.mock.calls[0][0].trace.roots[0].spanId).toBe("a");
+    expect(w.currentFile()).toBe("rollout.jsonl");
+    expect(lastStatus()).toBe("live");
+  });
 
-    // No change -> no re-emit.
-    await w.fastTick();
+  it("reports 'empty' when the folder has no candidate files", async () => {
+    const { w, onUpdate, lastStatus } = harness({ candidates: [], files: {} });
+    await w.init();
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(lastStatus()).toBe("empty");
+  });
+
+  it("reports 'no-trace' when candidates exist but none parse", async () => {
+    const { w, onUpdate, lastStatus } = harness({
+      candidates: [{ name: "models_cache.json", lastModified: 10 }],
+      files: { "models_cache.json": { lastModified: 10, text: NOT_TRACE } },
+    });
+    await w.init();
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(lastStatus()).toBe("no-trace");
+  });
+
+  it("re-emits when the current file grows, and skips an unchanged read", async () => {
+    const { w, state, onUpdate } = harness({
+      candidates: [{ name: "run.jsonl", lastModified: 1 }],
+      files: { "run.jsonl": { lastModified: 1, text: TRACE("a") } },
+    });
+    await w.init();
     expect(onUpdate).toHaveBeenCalledTimes(1);
 
-    // File grows -> re-emit.
+    await w.fastTick(); // no change
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+
     state.files["run.jsonl"] = { lastModified: 2, text: TRACE("a", "b") };
     await w.fastTick();
     expect(onUpdate).toHaveBeenCalledTimes(2);
   });
 
-  it("swallows parse failures, keeps the last good state, and flags trouble only when sustained", async () => {
-    const { source, state } = fakeSource({
-      newest: { name: "run.jsonl", lastModified: 1 },
+  it("keeps the last good trace on a failed read and stalls only when sustained", async () => {
+    const { w, state, onUpdate, statuses } = harness({
+      candidates: [{ name: "run.jsonl", lastModified: 1 }],
       files: { "run.jsonl": { lastModified: 1, text: TRACE("a") } },
     });
-    const onUpdate = vi.fn();
-    const onTrouble = vi.fn();
-    const w = createLiveWatcher(source, { onUpdate, onEmpty: vi.fn(), onTrouble, onRecovered: vi.fn() });
     await w.init();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
 
-    // One half-written read (newer mtime, malformed text): swallowed, last good
-    // retained, and NOT yet flagged as trouble — normal mid-write jitter.
+    // One half-written read: swallowed, last good kept, NOT yet stalled.
     state.files["run.jsonl"] = { lastModified: 2, text: "{ half-written" };
-    await expect(w.fastTick()).resolves.toBeUndefined(); // does not throw
-    expect(onUpdate).toHaveBeenCalledTimes(1); // still just the init emit
-    expect(onTrouble).not.toHaveBeenCalled();
+    await expect(w.fastTick()).resolves.toBeUndefined();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(statuses).not.toContain("stalled");
 
-    // Two more consecutive failures (new mtimes) cross the threshold -> trouble.
+    // Two more consecutive failures cross the threshold -> stalled.
     state.files["run.jsonl"] = { lastModified: 3, text: "{ still bad" };
     await w.fastTick();
     state.files["run.jsonl"] = { lastModified: 4, text: "{ still bad" };
     await w.fastTick();
-    expect(onTrouble).toHaveBeenCalled();
-    expect(onUpdate).toHaveBeenCalledTimes(1); // never re-emitted on failure
+    expect(statuses).toContain("stalled");
+    expect(onUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it("switches to a newer run file on a slow tick", async () => {
-    const { source, state } = fakeSource({
-      newest: { name: "runA.jsonl", lastModified: 1 },
+  it("switches to a newer parseable run on a slow tick", async () => {
+    const { w, state, onUpdate } = harness({
+      candidates: [{ name: "runA.jsonl", lastModified: 1 }],
       files: { "runA.jsonl": { lastModified: 1, text: TRACE("a") } },
     });
-    const onUpdate = vi.fn();
-    const w = createLiveWatcher(source, { onUpdate, onEmpty: vi.fn(), onTrouble: vi.fn(), onRecovered: vi.fn() });
     await w.init();
 
-    state.newest = { name: "runB.jsonl", lastModified: 9 };
+    state.candidates.push({ name: "runB.jsonl", lastModified: 9 });
     state.files["runB.jsonl"] = { lastModified: 9, text: TRACE("b") };
     await w.slowTick();
     expect(onUpdate).toHaveBeenCalledTimes(2);
-    const last = onUpdate.mock.calls[1][0];
-    expect(last.label).toBe("runB.jsonl");
+    expect(onUpdate.mock.calls[1][0].label).toBe("runB.jsonl");
     expect(w.currentFile()).toBe("runB.jsonl");
   });
 
-  it("reports onEmpty when no trace file is found", async () => {
-    const onEmpty = vi.fn();
-    const w = createLiveWatcher(
-      { scanNewest: async () => null, read: async () => null },
-      { onUpdate: vi.fn(), onEmpty, onTrouble: vi.fn(), onRecovered: vi.fn() },
-    );
+  it("discovers a first trace on a later tick if the folder was empty at first", async () => {
+    const { w, state, onUpdate, lastStatus } = harness({ candidates: [], files: {} });
     await w.init();
-    expect(onEmpty).toHaveBeenCalled();
+    expect(lastStatus()).toBe("empty");
+
+    state.candidates.push({ name: "run.jsonl", lastModified: 1 });
+    state.files["run.jsonl"] = { lastModified: 1, text: TRACE("a") };
+    await w.slowTick();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(lastStatus()).toBe("live");
   });
 });

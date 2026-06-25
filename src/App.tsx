@@ -16,6 +16,7 @@ import { useLiveWatch } from "./hooks/useLiveWatch";
 import { pickFolder } from "./lib/folderWatch";
 import { latestSpanId } from "./core/live";
 import { LiveBar } from "./components/live/LiveBar";
+import { LiveStandby } from "./components/live/LiveStandby";
 import { BackToLivePill } from "./components/live/BackToLivePill";
 import type { LiveUpdate } from "./lib/liveEngine";
 
@@ -239,17 +240,20 @@ export default function App() {
   const currentMatchId =
     matchCount > 0 ? (search?.orderedMatchIds[matchIndex] ?? null) : null;
 
-  // Before the first live trace arrives there is no AppShell (hence no LiveBar),
-  // so an empty-folder pick would otherwise give no feedback. Surface it here.
-  const loaderError =
-    live && !trace && liveWatch.state === "empty"
-      ? "No session files (.json / .jsonl) found in that folder. It will start as soon as one appears."
-      : error;
-
   return (
     <ThemeProvider>
       {!trace ? (
-        <Loader onLoad={onLoad} onError={setError} error={loaderError} onStartLive={startLive} />
+        live ? (
+          // Live mode active but no trace parsed yet — always show status so a
+          // folder pick never looks like "nothing happened".
+          <LiveStandby
+            state={liveWatch.state}
+            folderName={liveWatch.folderName}
+            onStop={stopLive}
+          />
+        ) : (
+          <Loader onLoad={onLoad} onError={setError} error={error} onStartLive={startLive} />
+        )
       ) : (
         <AppShell
           activeView={activeView}

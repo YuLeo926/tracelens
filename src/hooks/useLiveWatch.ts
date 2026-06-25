@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createLiveWatcher, type LiveUpdate } from "../lib/liveEngine";
+import { createLiveWatcher, type LiveUpdate, type LiveStatus } from "../lib/liveEngine";
 import { createFolderSource, baseName } from "../lib/folderWatch";
 
 const FAST_MS = 1500;
 const SLOW_MS = 5000;
 
-export type LiveState = "idle" | "watching" | "empty" | "trouble";
+export type LiveState = "idle" | LiveStatus;
 
 interface Options {
   onUpdate: (update: LiveUpdate) => void;
@@ -32,21 +32,20 @@ export function useLiveWatch({ onUpdate }: Options) {
     timers.current.forEach((t) => clearInterval(t));
     timers.current = [];
     setFolderName(dir.name);
-    setState("watching");
+    setCurrentFile("");
+    setState("scanning");
 
     const source = createFolderSource(dir);
     const watcher = createLiveWatcher(source, {
       onUpdate: (u) => {
         setCurrentFile(baseName(u.label));
-        setState("watching");
         onUpdateRef.current(u);
       },
-      onEmpty: () => setState("empty"),
-      onTrouble: () => setState("trouble"),
-      onRecovered: () => setState("watching"),
+      onStatus: (s) => setState(s),
     });
 
-    void watcher.init();
+    // init can reject if the folder can't be enumerated at all — surface it.
+    watcher.init().catch(() => setState("error"));
     timers.current.push(window.setInterval(() => void watcher.fastTick(), FAST_MS));
     timers.current.push(window.setInterval(() => void watcher.slowTick(), SLOW_MS));
   }, []);

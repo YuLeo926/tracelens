@@ -3,8 +3,8 @@ import { parseTraceText } from "../core/parse";
 
 /** Where live bytes come from. Implemented by folderWatch; faked in tests. */
 export interface LiveSource {
-  /** Newest trace file in the folder (name = relative path), or null if none. */
-  scanNewest(): Promise<{ name: string; lastModified: number } | null>;
+  /** Candidate trace files in the folder, NEWEST first. */
+  listCandidates(): Promise<Array<{ name: string; lastModified: number }>>;
   /** Read one file's current text + mtime, or null if it is gone. */
   read(name: string): Promise<{ lastModified: number; text: string } | null>;
 }
@@ -15,11 +15,20 @@ export interface LiveUpdate {
   source: string; // raw text, for share/export
 }
 
+/**
+ * What the watcher is doing right now, so the UI always has something to show:
+ * - scanning: looking for a readable trace
+ * - live: following a parseable file
+ * - empty: the folder has no .json/.jsonl files at all
+ * - no-trace: files exist but none parse as a trace (e.g. only config JSON)
+ * - stalled: was live, but the current file keeps failing to read (mid-write)
+ * - error: the folder itself could not be read (permission, removed)
+ */
+export type LiveStatus = "scanning" | "live" | "empty" | "no-trace" | "stalled" | "error";
+
 export interface LiveCallbacks {
   onUpdate(update: LiveUpdate): void;
-  onEmpty(): void;
-  onTrouble(consecutiveFailures: number): void;
-  onRecovered(): void;
+  onStatus(status: LiveStatus): void;
 }
 
 export interface LiveWatcher {
@@ -35,75 +44,78 @@ export function createLiveWatcher(source: LiveSource, cb: LiveCallbacks): LiveWa
   let current: string | null = null;
   let lastMtime = -1;
   let failures = 0;
-  let troubled = false;
 
-  // Parse `text` best-effort and emit. Returns true on success.
-  const tryEmit = (name: string, mtime: number, text: string): boolean => {
+  const parse = (text: string): ParsedTrace | null => {
     try {
-      const trace = parseTraceText(text);
-      lastMtime = mtime;
-      failures = 0;
-      if (troubled) {
-        troubled = false;
-        cb.onRecovered();
-      }
-      cb.onUpdate({ trace, label: name, source: text });
-      return true;
+      return parseTraceText(text);
     } catch {
-      // Best-effort: a parse failure is usually a half-written read. Swallow it,
-      // keep the last good render, and only flag trouble once failures are
-      // sustained (>= threshold) so normal mid-write jitter doesn't flap the UI.
-      failures += 1;
-      if (failures >= TROUBLE_THRESHOLD && !troubled) {
-        troubled = true;
-      }
-      if (troubled) cb.onTrouble(failures);
-      return false;
+      return null; // not a trace, or a half-written read
     }
   };
 
-  const adopt = async (name: string) => {
+  const emit = (name: string, mtime: number, text: string, trace: ParsedTrace) => {
     current = name;
-    lastMtime = -1;
-    const file = await source.read(name);
-    if (file) tryEmit(name, file.lastModified, file.text);
+    lastMtime = mtime;
+    failures = 0;
+    cb.onStatus("live");
+    cb.onUpdate({ trace, label: name, source: text });
+  };
+
+  // Adopt the newest candidate that actually parses. When onlyNewer is true we
+  // stop once we reach the file we're already following (nothing newer to switch
+  // to), which keeps the common "still the newest run" case cheap.
+  const adoptNewestParseable = async (onlyNewer: boolean): Promise<void> => {
+    let candidates: Array<{ name: string; lastModified: number }>;
+    try {
+      candidates = await source.listCandidates();
+    } catch {
+      cb.onStatus("error");
+      return;
+    }
+    if (candidates.length === 0) {
+      if (!current) cb.onStatus("empty");
+      return;
+    }
+    for (const c of candidates) {
+      if (onlyNewer && current && c.name === current) return; // current is newest parseable
+      const file = await source.read(c.name);
+      if (!file) continue;
+      const trace = parse(file.text);
+      if (trace) {
+        emit(c.name, file.lastModified, file.text, trace);
+        return;
+      }
+    }
+    if (!current) cb.onStatus("no-trace"); // files exist, none parse yet
+  };
+
+  const noteFailure = () => {
+    failures += 1;
+    if (failures >= TROUBLE_THRESHOLD) cb.onStatus("stalled");
   };
 
   return {
     async init() {
-      const newest = await source.scanNewest();
-      if (!newest) {
-        cb.onEmpty();
-        return;
-      }
-      await adopt(newest.name);
+      cb.onStatus("scanning");
+      await adoptNewestParseable(false);
     },
 
     async fastTick() {
-      if (!current) return;
+      if (!current) return; // discovery happens on the slow tick
       const file = await source.read(current);
       if (!file) {
-        // File vanished; let the next slow tick re-scan.
-        failures += 1;
-        if (failures >= TROUBLE_THRESHOLD) {
-          troubled = true;
-          cb.onTrouble(failures);
-        }
+        noteFailure();
         return;
       }
       if (file.lastModified === lastMtime) return; // no change
-      tryEmit(current, file.lastModified, file.text);
+      const trace = parse(file.text);
+      if (trace) emit(current, file.lastModified, file.text, trace);
+      else noteFailure();
     },
 
     async slowTick() {
-      const newest = await source.scanNewest();
-      if (!newest) {
-        cb.onEmpty();
-        return;
-      }
-      if (newest.name !== current) {
-        await adopt(newest.name);
-      }
+      // No current yet -> keep looking. Otherwise see if a newer run appeared.
+      await adoptNewestParseable(current !== null);
     },
 
     currentFile() {

@@ -58,22 +58,14 @@ export function createFolderSource(dir: FileSystemDirectoryHandle): LiveSource {
   let handles = new Map<string, FileSystemFileHandle>();
 
   return {
-    async scanNewest() {
+    async listCandidates() {
       const next = new Map<string, FileSystemFileHandle>();
       const meta: Array<{ name: string; lastModified: number }> = [];
       await collect(dir, "", 0, next, meta);
       handles = next;
-      let best: { name: string; lastModified: number } | null = null;
-      for (const m of meta) {
-        if (
-          !best ||
-          m.lastModified > best.lastModified ||
-          (m.lastModified === best.lastModified && m.name > best.name)
-        ) {
-          best = m;
-        }
-      }
-      return best;
+      // Newest first; ties broken by name (desc) for stable ordering.
+      meta.sort((a, b) => b.lastModified - a.lastModified || (a.name > b.name ? -1 : 1));
+      return meta;
     },
 
     async read(name) {

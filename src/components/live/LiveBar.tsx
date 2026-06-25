@@ -9,13 +9,16 @@ interface Props {
 
 const MESSAGE: Record<LiveState, string> = {
   idle: "",
-  watching: "Live",
-  empty: "No session files found in this folder",
-  trouble: "Waiting for a complete write…",
+  scanning: "Scanning…",
+  live: "Live",
+  empty: "No session files in this folder",
+  "no-trace": "No readable trace yet",
+  stalled: "Waiting for a complete write…",
+  error: "Couldn't read that folder",
 };
 
 export function LiveBar({ state, folderName, currentFile, onStop }: Props) {
-  const live = state === "watching";
+  const live = state === "live";
   return (
     <div className="flex items-center gap-2 border-b border-border bg-panel px-4 py-1.5 text-[12px]">
       <span
