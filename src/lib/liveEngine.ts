@@ -40,8 +40,13 @@ export interface LiveWatcher {
 
 const TROUBLE_THRESHOLD = 3;
 
-export function createLiveWatcher(source: LiveSource, cb: LiveCallbacks): LiveWatcher {
-  let current: string | null = null;
+export function createLiveWatcher(
+  source: LiveSource,
+  cb: LiveCallbacks,
+  opts: { lockTo?: string } = {},
+): LiveWatcher {
+  const locked = opts.lockTo ?? null;
+  let current: string | null = locked;
   let lastMtime = -1;
   let failures = 0;
 
@@ -107,31 +112,34 @@ export function createLiveWatcher(source: LiveSource, cb: LiveCallbacks): LiveWa
     }
   };
 
+  const pollCurrent = async (): Promise<void> => {
+    if (!current) return;
+    const file = await source.read(current);
+    if (!file) {
+      noteFailure();
+      return;
+    }
+    if (file.lastModified === lastMtime) return; // no change
+    const trace = parse(file.text);
+    if (trace) emit(current, file.lastModified, file.text, trace);
+    else noteFailure();
+  };
+
   return {
     init() {
       return guard(async () => {
         cb.onStatus("scanning");
-        await adoptNewestParseable(false);
+        if (locked) await pollCurrent();
+        else await adoptNewestParseable(false);
       });
     },
 
     fastTick() {
-      return guard(async () => {
-        if (!current) return; // discovery happens on the slow tick
-        const file = await source.read(current);
-        if (!file) {
-          noteFailure();
-          return;
-        }
-        if (file.lastModified === lastMtime) return; // no change
-        const trace = parse(file.text);
-        if (trace) emit(current, file.lastModified, file.text, trace);
-        else noteFailure();
-      });
+      return guard(pollCurrent);
     },
 
     slowTick() {
-      // No current yet -> keep looking. Otherwise see if a newer run appeared.
+      if (locked) return Promise.resolve(); // locked: never switch away
       return guard(() => adoptNewestParseable(current !== null));
     },
 

@@ -136,4 +136,28 @@ describe("createLiveWatcher", () => {
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(lastStatus()).toBe("live");
   });
+
+  it("locked mode follows only the given file and never switches to a newer one", async () => {
+    const { source } = fakeSource({
+      candidates: [
+        { name: "newer.jsonl", lastModified: 10 },
+        { name: "picked.jsonl", lastModified: 5 },
+      ],
+      files: {
+        "newer.jsonl": { lastModified: 10, text: TRACE("y") },
+        "picked.jsonl": { lastModified: 5, text: TRACE("x") },
+      },
+    });
+    const onUpdate = vi.fn();
+    const w = createLiveWatcher(source, { onUpdate, onStatus: () => {} }, { lockTo: "picked.jsonl" });
+
+    await w.init();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][0].label).toBe("picked.jsonl"); // not the newer one
+    expect(w.currentFile()).toBe("picked.jsonl");
+
+    await w.slowTick(); // must NOT switch to newer.jsonl
+    expect(w.currentFile()).toBe("picked.jsonl");
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
 });
