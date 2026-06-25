@@ -24,6 +24,7 @@ The heavyweight observability platforms can show you this — but most of them w
 - **Search + jump** — filter the tree as you type (`⌘K`) across names, models, input/output, and jump straight to the next error or the slowest span.
 - **Flamegraph** — see where the time and the money went, weighted by duration, tokens, or cost.
 - **Diff two runs** — load a second trace and compare: a summary delta bar (regressions in red, improvements in green) over a merged tree that flags what changed, was added, or removed.
+- **Annotate + export an eval set** — rate any span 👍/👎 with a tag and a note in the detail panel; annotations are saved in your browser (per conversation, auto-restored) and marked in the tree. Export them as **JSONL** or **CSV** — this conversation or all — to turn real runs into an evaluation dataset.
 - **Shareable export** — copy a self-loading link (the trace lives in the URL) or download the JSON; nothing is uploaded.
 - **Roll-ups, errors, and a detail panel** — total duration / tokens / cost / errors at a glance; failed spans flagged in red; per-span input, output, model, tokens, and raw attributes.
 - **Light & dark**, bundled sample traces, and **100% client-side** — static build, works offline, the file never leaves your browser.
@@ -118,7 +119,7 @@ src/
 **v2 — watch runs live, and become a layer others build on.**
 - ✅ Live tail — watch a local agent-log folder (Codex / Claude Code) and follow the newest run as it's written, entirely in the browser (File System Access API, Chromium)
 - ✅ Conversation browser — open a folder and pick a conversation from a list labeled by its first message + project, instead of guessing at timestamp-UUID filenames
-- Span annotations that export to evaluation datasets
+- ✅ Span annotations — rate spans 👍/👎 with tags + notes (saved locally, auto-restored) and export them as JSONL/CSV evaluation datasets
 - Publish the components as a headless, shadcn-style library to drop into any app
 - A Tauri desktop build for true push-based tailing and cross-browser support
 
