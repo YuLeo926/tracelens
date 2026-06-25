@@ -14,6 +14,7 @@ interface Props {
   showToggle: boolean;
   onSelect: () => void;
   onToggle: () => void;
+  mark?: "good" | "bad" | "note";
 }
 
 function HighlightedName({ name, query }: { name: string; query: string }) {
@@ -37,7 +38,7 @@ function HighlightedName({ name, query }: { name: string; query: string }) {
 
 export function SpanRow({
   node, traceStart, traceDuration, selected, hasChildren, collapsed,
-  isMatch, query, showToggle, onSelect, onToggle,
+  isMatch, query, showToggle, onSelect, onToggle, mark,
 }: Props) {
   const isError = node.status === "error";
   const color = isError ? "var(--error)" : kindColor(node.kind);
@@ -83,6 +84,11 @@ export function SpanRow({
         {node.model && (
           <span className="mono shrink-0 rounded border border-border bg-bg px-1 text-[10px] text-muted">
             {node.model}
+          </span>
+        )}
+        {mark && (
+          <span className="shrink-0 text-[11px]" title="annotated">
+            {mark === "good" ? "👍" : mark === "bad" ? "👎" : "📝"}
           </span>
         )}
       </div>

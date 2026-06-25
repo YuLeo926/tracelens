@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ParsedTrace } from "../../../core/types";
+import type { StoredAnnotation } from "../../../core/annotations";
 import { flatten } from "../../../core/parse";
 import { SpanRow } from "./SpanRow";
 import { TimeAxis } from "./TimeAxis";
@@ -15,11 +16,12 @@ interface Props {
   query: string;
   followId?: string | null;
   onUserScroll?: () => void;
+  annotations?: Record<string, StoredAnnotation> | null;
 }
 
 export function TreeView({
   trace, selectedId, onSelect, filtering, visibleIds, matchIds, currentMatchId, query,
-  followId, onUserScroll,
+  followId, onUserScroll, annotations,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const { startMs, durationMs } = trace.summary;
@@ -76,6 +78,10 @@ export function TreeView({
               showToggle={!filtering}
               onSelect={() => onSelect(node.spanId)}
               onToggle={() => toggle(node.spanId)}
+              mark={(() => {
+                const a = annotations?.[node.spanId];
+                return a ? (a.verdict ?? "note") : undefined;
+              })()}
             />
           ))
         )}
