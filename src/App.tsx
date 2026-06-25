@@ -80,7 +80,7 @@ export default function App() {
     setQuery("");
     setMatchIndex(0);
     setActiveView("tree");
-    liveWatch.start(dir);
+    liveWatch.followNewest(dir);
   }, [liveWatch]);
 
   const stopLive = useCallback(() => {

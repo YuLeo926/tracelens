@@ -28,29 +28,38 @@ export function useLiveWatch({ onUpdate }: Options) {
     setCurrentFile("");
   }, []);
 
-  const start = useCallback((dir: FileSystemDirectoryHandle) => {
+  const begin = useCallback((dir: FileSystemDirectoryHandle, lockTo?: string) => {
     timers.current.forEach((t) => clearInterval(t));
     timers.current = [];
     setFolderName(dir.name);
-    setCurrentFile("");
+    setCurrentFile(lockTo ? baseName(lockTo) : "");
     setState("scanning");
 
     const source = createFolderSource(dir);
-    const watcher = createLiveWatcher(source, {
-      onUpdate: (u) => {
-        setCurrentFile(baseName(u.label));
-        onUpdateRef.current(u);
+    const watcher = createLiveWatcher(
+      source,
+      {
+        onUpdate: (u) => {
+          setCurrentFile(baseName(u.label));
+          onUpdateRef.current(u);
+        },
+        onStatus: (s) => setState(s),
       },
-      onStatus: (s) => setState(s),
-    });
+      lockTo ? { lockTo } : {},
+    );
 
-    // init can reject if the folder can't be enumerated at all — surface it.
     watcher.init().catch(() => setState("error"));
     timers.current.push(window.setInterval(() => void watcher.fastTick(), FAST_MS));
     timers.current.push(window.setInterval(() => void watcher.slowTick(), SLOW_MS));
   }, []);
 
+  const followNewest = useCallback((dir: FileSystemDirectoryHandle) => begin(dir), [begin]);
+  const watchFile = useCallback(
+    (dir: FileSystemDirectoryHandle, name: string) => begin(dir, name),
+    [begin],
+  );
+
   useEffect(() => () => stop(), [stop]);
 
-  return { state, folderName, currentFile, start, stop };
+  return { state, folderName, currentFile, followNewest, watchFile, stop };
 }
