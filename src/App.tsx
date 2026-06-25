@@ -19,7 +19,9 @@ import { latestSpanId } from "./core/live";
 import { LiveBar } from "./components/live/LiveBar";
 import { LiveStandby } from "./components/live/LiveStandby";
 import { BackToLivePill } from "./components/live/BackToLivePill";
-import { ConversationList } from "./components/live/ConversationList";
+import { FolderBrowser } from "./components/live/FolderBrowser";
+import { useFailedScan } from "./hooks/useFailedScan";
+import { aggregateDashboard } from "./core/folderStats";
 import type { LiveUpdate } from "./lib/liveEngine";
 import { useAnnotations } from "./hooks/useAnnotations";
 import { AnnotationsView } from "./components/views/AnnotationsView";
@@ -42,6 +44,8 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const convo = useConversations(folderDir);
+  const dashboard = useMemo(() => aggregateDashboard(convo.conversations, Date.now()), [convo.conversations]);
+  const failedScan = useFailedScan(folderDir, convo.conversations);
   const live = folderDir !== null && folderView === "trace";
 
   const ann = useAnnotations(label);
@@ -292,11 +296,13 @@ export default function App() {
   return (
     <ThemeProvider>
       {folderDir && folderView === "list" ? (
-        <ConversationList
+        <FolderBrowser
           folderName={folderDir.name}
           conversations={convo.conversations}
           loading={convo.loading}
           error={convo.error}
+          dashboard={dashboard}
+          failed={failedScan}
           onOpen={openConversation}
           onFollowNewest={followNewest}
           onClose={reset}

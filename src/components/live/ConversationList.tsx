@@ -1,67 +1,35 @@
 import { useState } from "react";
-import { ThemeToggle } from "../shell/ThemeToggle";
 import { formatRelativeTime } from "../../core/format";
 import type { Conversation } from "../../hooks/useConversations";
 
 interface Props {
-  folderName: string;
   conversations: Conversation[];
   loading: boolean;
   error: boolean;
   onOpen: (name: string) => void;
-  onFollowNewest: () => void;
-  onClose: () => void;
+  projectFilter?: string;
 }
 
-export function ConversationList({
-  folderName, conversations, loading, error, onOpen, onFollowNewest, onClose,
-}: Props) {
+export function ConversationList({ conversations, loading, error, onOpen, projectFilter }: Props) {
   const [filter, setFilter] = useState("");
   const now = Date.now();
   const q = filter.trim().toLowerCase();
-  const rows = q
-    ? conversations.filter(
-        (c) =>
-          (c.title ?? c.name).toLowerCase().includes(q) ||
-          (c.project ?? "").toLowerCase().includes(q),
-      )
-    : conversations;
+  const rows = conversations.filter((c) => {
+    if (projectFilter && (c.project ?? "(unknown)") !== projectFilter) return false;
+    if (!q) return true;
+    return (c.title ?? c.name).toLowerCase().includes(q) || (c.project ?? "").toLowerCase().includes(q);
+  });
 
   return (
-    <div className="flex h-full flex-col bg-bg">
-      <header className="flex items-center justify-between border-b border-border bg-panel px-5 py-3">
-        <span className="wordmark text-lg text-text">tracelens</span>
-        <ThemeToggle />
-      </header>
-
-      <div className="flex items-center gap-2 border-b border-border bg-panel px-4 py-2 text-[12px]">
-        <span className="text-text">📂 {folderName}</span>
-        <span className="text-faint">· {conversations.length} conversations</span>
-        <button
-          type="button"
-          onClick={onFollowNewest}
-          className="ml-2 rounded border border-accent px-2 py-0.5 text-text hover:bg-elev"
-        >
-          📡 Follow newest (live)
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="ml-auto rounded border border-border px-2 py-0.5 text-text hover:border-accent"
-        >
-          Close
-        </button>
-      </div>
-
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-border px-4 py-2">
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by title or project…"
+          placeholder={projectFilter ? `Filter in ${projectFilter}…` : "Filter by title or project…"}
           className="w-full rounded border border-border bg-bg px-3 py-1.5 text-sm text-text outline-none focus:border-accent"
         />
       </div>
-
       <div className="min-h-0 flex-1 overflow-auto">
         {error ? (
           <div className="p-6 text-sm text-error">Couldn't read that folder.</div>
@@ -85,19 +53,13 @@ export function ConversationList({
                       </div>
                     </div>
                     {active && (
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ background: "var(--kind-agent)" }}
-                        title="recently active"
-                      />
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--kind-agent)" }} title="recently active" />
                     )}
                   </button>
                 </li>
               );
             })}
-            {loading && (
-              <li className="px-4 py-3 text-[12px] text-faint">Loading titles…</li>
-            )}
+            {loading && <li className="px-4 py-3 text-[12px] text-faint">Loading titles…</li>}
           </ul>
         )}
       </div>
