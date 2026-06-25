@@ -29,6 +29,34 @@ export function baseName(path: string): string {
   return i >= 0 ? path.slice(i + 1) : path;
 }
 
+/** Read just the first `maxBytes` of a file (cheap title peek for big logs). */
+export async function readHead(handle: FileSystemFileHandle, maxBytes = 262144): Promise<string> {
+  const file = await handle.getFile();
+  return file.slice(0, maxBytes).text();
+}
+
+export interface TraceFileRef {
+  name: string; // relative path
+  lastModified: number;
+  handle: FileSystemFileHandle;
+}
+
+/** Trace files in the folder, NEWEST first, capped at `limit`, with handles. */
+export async function scanTraceFiles(
+  dir: FileSystemDirectoryHandle,
+  limit = 300,
+): Promise<TraceFileRef[]> {
+  const handles = new Map<string, FileSystemFileHandle>();
+  const meta: Array<{ name: string; lastModified: number }> = [];
+  await collect(dir, "", 0, handles, meta);
+  meta.sort((a, b) => b.lastModified - a.lastModified || (a.name > b.name ? -1 : 1));
+  return meta.slice(0, limit).map((m) => ({
+    name: m.name,
+    lastModified: m.lastModified,
+    handle: handles.get(m.name)!,
+  }));
+}
+
 /** Recurse the directory, collecting trace files keyed by relative path. */
 async function collect(
   dir: FileSystemDirectoryHandle,
