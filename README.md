@@ -20,7 +20,7 @@ The heavyweight observability platforms can show you this — but most of them w
 
 - **Reads many formats, auto-detected** — OpenInference / OTel GenAI, raw OpenTelemetry (OTLP) JSON, Codex (`codex exec --json` and saved session rollouts), Claude Code transcripts, and raw Anthropic Messages logs — as JSON or JSONL. Drop the file; Tracelens figures out the format.
 - **Call tree with an inline waterfall** — every span is colored by kind (LLM, tool, retriever, agent…) and shows where in the run it happened and how long it took.
-- **Live tail (Chromium)** — point it at a local agent-log folder (e.g. `~/.codex/sessions` or `~/.claude/projects`) and watch the active run unfold as it's written: it auto-follows the newest conversation, jumps to the latest step, and pauses the moment you start inspecting — then a tap on the "back to live" pill catches you up. The files are read straight from disk in your browser; nothing is uploaded.
+- **Live tail + conversation browser (Chromium)** — point it at a local agent-log folder (e.g. `~/.codex/sessions` or `~/.claude/projects`) and **browse its conversations**, each labeled by its first message and project (read from the file's head, so it's fast even with huge logs), newest first and filterable. Open any one to read it — watching **live** if it's still being written — or hit **Follow newest** to track the active run as it unfolds, auto-jumping to the latest step and pausing the moment you start inspecting (a "back to live" pill catches you up). Files are read straight from disk in your browser; nothing is uploaded.
 - **Search + jump** — filter the tree as you type (`⌘K`) across names, models, input/output, and jump straight to the next error or the slowest span.
 - **Flamegraph** — see where the time and the money went, weighted by duration, tokens, or cost.
 - **Diff two runs** — load a second trace and compare: a summary delta bar (regressions in red, improvements in green) over a merged tree that flags what changed, was added, or removed.
@@ -117,8 +117,9 @@ src/
 
 **v2 — watch runs live, and become a layer others build on.**
 - ✅ Live tail — watch a local agent-log folder (Codex / Claude Code) and follow the newest run as it's written, entirely in the browser (File System Access API, Chromium)
-- Publish the components as a headless, shadcn-style library to drop into any app
+- ✅ Conversation browser — open a folder and pick a conversation from a list labeled by its first message + project, instead of guessing at timestamp-UUID filenames
 - Span annotations that export to evaluation datasets
+- Publish the components as a headless, shadcn-style library to drop into any app
 - A Tauri desktop build for true push-based tailing and cross-browser support
 
 ## Renaming the project
