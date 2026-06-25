@@ -47,10 +47,13 @@ function lastSegment(path: string): string | undefined {
 }
 
 function cleanTitle(raw: string): string {
-  // Drop one or more leading XML-ish tag blocks (e.g. <environment_context>…</…>).
-  let s = raw.replace(/^\s*(<([a-zA-Z_][\w-]*)\b[^>]*>[\s\S]*?<\/\2>\s*)+/, "");
-  s = s.replace(/\s+/g, " ").trim();
-  if (!s) s = raw.replace(/\s+/g, " ").trim();
+  // Drop leading XML-ish tag blocks. Codex's first user turn is often ENTIRELY
+  // an <environment_context>…</environment_context> (or <user_instructions>…)
+  // block of injected boilerplate; the real ask is the next user message. Strip
+  // those and return "" when nothing real remains so the caller moves on to the
+  // next user message instead of showing the boilerplate.
+  const stripped = raw.replace(/^\s*(<([a-zA-Z_][\w-]*)\b[^>]*>[\s\S]*?<\/\2>\s*)+/, "");
+  const s = stripped.replace(/\s+/g, " ").trim();
   return s.length > MAX_TITLE ? s.slice(0, MAX_TITLE - 1) + "…" : s;
 }
 
@@ -78,8 +81,10 @@ export function extractConversationMeta(head: string): ConversationMeta {
   }
   for (const r of records) {
     const text = userText(r);
-    if (text && text.trim()) {
-      meta.title = cleanTitle(text);
+    if (!text) continue;
+    const title = cleanTitle(text);
+    if (title) {
+      meta.title = title;
       break;
     }
   }
