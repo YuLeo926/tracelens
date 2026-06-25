@@ -86,3 +86,30 @@ describe("codexAdapter — session rollout", () => {
     expect(msg.kind).toBe("llm");
   });
 });
+
+// Real Codex sessions store an image tool result (e.g. a screenshot) as an
+// array of content blocks, not a string. The output must still parse.
+const ROLLOUT_IMAGE = [
+  { timestamp: "2026-06-15T12:59:51.565Z", type: "session_meta", payload: { id: "sess-img" } },
+  { timestamp: "2026-06-15T12:59:59.386Z", type: "response_item", payload: { type: "function_call", name: "screenshot", arguments: "{}", call_id: "call_img" } },
+  { timestamp: "2026-06-15T12:59:59.754Z", type: "response_item", payload: { type: "function_call_output", call_id: "call_img", output: [{ type: "image_url", image_url: "data:image/png;base64,AAAA", detail: "low" }] } },
+  { timestamp: "2026-06-15T13:00:00.100Z", type: "response_item", payload: { type: "function_call", name: "shell", arguments: '{"command":"ls"}', call_id: "call_obj" } },
+  { timestamp: "2026-06-15T13:00:00.300Z", type: "response_item", payload: { type: "function_call_output", call_id: "call_obj", output: { content: "Exit code: 0\nsrc", success: true } } },
+];
+
+describe("codexAdapter — non-string tool outputs", () => {
+  it("does not crash when function_call_output.output is an image array", () => {
+    const t = parseTrace(ROLLOUT_IMAGE);
+    const span = t.byId.get("call_img")!;
+    expect(span.kind).toBe("tool");
+    expect(span.status).toBe("ok");
+    expect(typeof span.output).toBe("string"); // summarized, not crashed
+  });
+
+  it("reads the content of an object-shaped output and still detects exit codes", () => {
+    const t = parseTrace(ROLLOUT_IMAGE);
+    const span = t.byId.get("call_obj")!;
+    expect(span.output).toContain("src");
+    expect(span.status).toBe("ok");
+  });
+});

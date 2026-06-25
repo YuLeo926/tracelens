@@ -136,6 +136,31 @@ function outputText(content: unknown): string | undefined {
   return undefined;
 }
 
+// A function_call_output's `output` is usually a string, but real sessions also
+// store an object ({ content, success }) or an array of content blocks (e.g. an
+// image/screenshot result). Coerce any shape to a string so the rest of the
+// adapter — including the "Exit code" check — never sees a non-string.
+function callOutputText(output: unknown): string | undefined {
+  if (typeof output === "string") return output;
+  if (Array.isArray(output)) {
+    const parts = output.map((b) => {
+      if (b && typeof b === "object") {
+        const block = b as { text?: unknown; type?: unknown };
+        if (typeof block.text === "string") return block.text;
+        if (typeof block.type === "string") return `[${block.type}]`;
+      }
+      return typeof b === "string" ? b : "[block]";
+    });
+    return parts.length ? parts.join("\n") : undefined;
+  }
+  if (output && typeof output === "object") {
+    const content = (output as { content?: unknown }).content;
+    if (typeof content === "string") return content;
+    return JSON.stringify(output);
+  }
+  return undefined;
+}
+
 function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
   let sessionId: string | undefined;
   let model: string | undefined;
@@ -165,7 +190,7 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
       if (p.type === "function_call") {
         calls.push({ callId: String(p.call_id ?? `call-${i}`), name: p.name as string, args: p.arguments as string, ts });
       } else if (p.type === "function_call_output") {
-        outputs.set(String(p.call_id), { output: p.output as string, ts });
+        outputs.set(String(p.call_id), { output: callOutputText(p.output), ts });
       } else if (p.type === "message" && p.role === "assistant") {
         messages.push({ text: outputText(p.content), ts });
       }
