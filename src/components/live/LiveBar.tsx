@@ -45,7 +45,7 @@ export function LiveBar({ state, folderName, currentFile, onStop }: Props) {
         onClick={onStop}
         className="ml-auto rounded border border-border px-2 py-0.5 text-text hover:border-accent"
       >
-        Stop
+        ← Conversations
       </button>
     </div>
   );

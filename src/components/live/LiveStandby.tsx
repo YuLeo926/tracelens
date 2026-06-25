@@ -62,7 +62,7 @@ export function LiveStandby({ state, folderName, onStop }: Props) {
           onClick={onStop}
           className="mt-2 rounded-lg border border-border bg-panel px-4 py-2 text-sm text-text hover:border-accent"
         >
-          {state === "scanning" ? "Cancel" : "Choose another folder"}
+          ← Conversations
         </button>
       </div>
     </div>
