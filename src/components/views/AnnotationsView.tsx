@@ -3,7 +3,33 @@ import type { StoredAnnotation } from "../../core/annotations";
 import { buildRows, toJSONL, toCSV } from "../../core/annotations";
 import { loadStore } from "../../lib/annotationStore";
 
-function download(filename: string, text: string, mime: string) {
+// Save via the File System Access "Save As" dialog when available (lets the
+// user choose the location); fall back to a normal browser download otherwise.
+async function download(filename: string, text: string, mime: string) {
+  const picker = (window as unknown as {
+    showSaveFilePicker?: (o: {
+      suggestedName?: string;
+      types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+    }) => Promise<{ createWritable: () => Promise<{ write: (d: string) => Promise<void>; close: () => Promise<void> }> }>;
+  }).showSaveFilePicker;
+
+  if (picker) {
+    try {
+      const ext = filename.slice(filename.lastIndexOf("."));
+      const handle = await picker({
+        suggestedName: filename,
+        types: [{ accept: { [mime.split(";")[0]]: [ext] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      return;
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return; // user cancelled the dialog
+      // any other error: fall through to the normal download
+    }
+  }
+
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -35,8 +61,12 @@ export function AnnotationsView({ annotations, label, onSelect }: Props) {
   const doExport = (fmt: "jsonl" | "csv") => {
     const rows = rowsFor(scope);
     if (rows.length === 0) return;
-    if (fmt === "jsonl") download("annotations.jsonl", toJSONL(rows), "application/x-ndjson");
-    else download("annotations.csv", toCSV(rows), "text/csv");
+    if (fmt === "jsonl") {
+      void download("annotations.jsonl", toJSONL(rows), "application/x-ndjson");
+    } else {
+      // Prepend a UTF-8 BOM so Excel reads non-ASCII (e.g. Chinese) correctly.
+      void download("annotations.csv", String.fromCharCode(0xFEFF) + toCSV(rows), "text/csv;charset=utf-8");
+    }
   };
 
   return (
