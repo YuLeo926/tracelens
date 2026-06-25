@@ -7,9 +7,9 @@ describe("views registry", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("has the tree, flamegraph and diff ready", () => {
+  it("has the tree, flamegraph, diff and annotations ready", () => {
     const ready = VIEWS.filter((v) => v.status === "ready").map((v) => v.id);
-    expect(ready).toEqual(["tree", "flamegraph", "diff"]);
+    expect(ready).toEqual(["tree", "flamegraph", "diff", "annotations"]);
   });
 
   it("defaults to a view that is ready", () => {
