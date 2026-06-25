@@ -35,9 +35,31 @@ export async function readHead(handle: FileSystemFileHandle, maxBytes = 262144):
   return file.slice(0, maxBytes).text();
 }
 
+/** Read just the LAST `maxBytes` of a file (cheap stats peek, e.g. token totals). */
+export async function readTail(handle: FileSystemFileHandle, maxBytes = 65536): Promise<string> {
+  const file = await handle.getFile();
+  const start = Math.max(0, file.size - maxBytes);
+  return file.slice(start).text();
+}
+
+/** Read a file's full text by relative path, or null if it can't be read. */
+export async function readFileText(
+  dir: FileSystemDirectoryHandle,
+  name: string,
+): Promise<string | null> {
+  const handle = await resolveFileHandle(dir, name);
+  if (!handle) return null;
+  try {
+    return await (await handle.getFile()).text();
+  } catch {
+    return null;
+  }
+}
+
 export interface TraceFileRef {
   name: string; // relative path
   lastModified: number;
+  sizeBytes: number;
   handle: FileSystemFileHandle;
 }
 
@@ -47,12 +69,13 @@ export async function scanTraceFiles(
   limit = 300,
 ): Promise<TraceFileRef[]> {
   const handles = new Map<string, FileSystemFileHandle>();
-  const meta: Array<{ name: string; lastModified: number }> = [];
+  const meta: Array<{ name: string; lastModified: number; sizeBytes: number }> = [];
   await collect(dir, "", 0, handles, meta);
   meta.sort((a, b) => b.lastModified - a.lastModified || (a.name > b.name ? -1 : 1));
   return meta.slice(0, limit).map((m) => ({
     name: m.name,
     lastModified: m.lastModified,
+    sizeBytes: m.sizeBytes,
     handle: handles.get(m.name)!,
   }));
 }
@@ -63,7 +86,7 @@ async function collect(
   prefix: string,
   depth: number,
   out: Map<string, FileSystemFileHandle>,
-  meta: Array<{ name: string; lastModified: number }>,
+  meta: Array<{ name: string; lastModified: number; sizeBytes: number }>,
 ): Promise<void> {
   if (depth > MAX_DEPTH) return;
   // values() is an async iterator on the handle.
@@ -76,7 +99,7 @@ async function collect(
     } else if (TRACE_EXT.test(entry.name)) {
       const file = await (entry as FileSystemFileHandle).getFile();
       out.set(path, entry as FileSystemFileHandle);
-      meta.push({ name: path, lastModified: file.lastModified });
+      meta.push({ name: path, lastModified: file.lastModified, sizeBytes: file.size });
     }
   }
 }
@@ -109,7 +132,7 @@ export function createFolderSource(dir: FileSystemDirectoryHandle): LiveSource {
   return {
     async listCandidates() {
       const next = new Map<string, FileSystemFileHandle>();
-      const meta: Array<{ name: string; lastModified: number }> = [];
+      const meta: Array<{ name: string; lastModified: number; sizeBytes: number }> = [];
       await collect(dir, "", 0, next, meta);
       handles.clear();
       for (const [k, v] of next) handles.set(k, v);

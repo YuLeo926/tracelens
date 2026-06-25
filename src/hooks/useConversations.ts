@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
-import { scanTraceFiles, readHead } from "../lib/folderWatch";
+import { scanTraceFiles, readHead, readTail } from "../lib/folderWatch";
 import { extractConversationMeta } from "../core/conversationMeta";
+import { startMsOf, modelOf, extractTokens } from "../core/folderStats";
 
 export interface Conversation {
   name: string;
   lastModified: number;
+  sizeBytes: number;
   title?: string;
   project?: string;
+  startMs?: number;
+  model?: string;
+  tokensIn?: number;
+  tokensOut?: number;
 }
 
 interface Result {
@@ -15,7 +21,7 @@ interface Result {
   error: boolean;
 }
 
-/** List the folder's conversations, filling in titles progressively. */
+/** List the folder's conversations, filling in title/project/tokens progressively. */
 export function useConversations(dir: FileSystemDirectoryHandle | null): Result {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,20 +51,28 @@ export function useConversations(dir: FileSystemDirectoryHandle | null): Result 
         return;
       }
       if (cancelled) return;
-      // Show the list immediately (time is free); titles fill in below.
-      setConversations(files.map((f) => ({ name: f.name, lastModified: f.lastModified })));
+      setConversations(
+        files.map((f) => ({ name: f.name, lastModified: f.lastModified, sizeBytes: f.sizeBytes })),
+      );
       for (const f of files) {
         if (cancelled) return;
-        let meta = {};
+        let extra: Partial<Conversation> = {};
         try {
-          meta = extractConversationMeta(await readHead(f.handle));
+          const head = await readHead(f.handle);
+          const tail = await readTail(f.handle);
+          const tokens = extractTokens(tail);
+          extra = {
+            ...extractConversationMeta(head),
+            startMs: startMsOf(head),
+            model: modelOf(head),
+            tokensIn: tokens?.tokensIn,
+            tokensOut: tokens?.tokensOut,
+          };
         } catch {
-          /* leave title/project undefined for this row */
+          /* leave fields undefined for this row */
         }
         if (cancelled) return;
-        setConversations((prev) =>
-          prev.map((c) => (c.name === f.name ? { ...c, ...meta } : c)),
-        );
+        setConversations((prev) => prev.map((c) => (c.name === f.name ? { ...c, ...extra } : c)));
       }
       if (!cancelled) setLoading(false);
     })();
