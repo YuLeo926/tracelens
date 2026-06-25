@@ -21,6 +21,9 @@ import { LiveStandby } from "./components/live/LiveStandby";
 import { BackToLivePill } from "./components/live/BackToLivePill";
 import { ConversationList } from "./components/live/ConversationList";
 import type { LiveUpdate } from "./lib/liveEngine";
+import { useAnnotations } from "./hooks/useAnnotations";
+import { AnnotationsView } from "./components/views/AnnotationsView";
+import type { Annotation } from "./core/annotations";
 
 export default function App() {
   const [trace, setTrace] = useState<ParsedTrace | null>(null);
@@ -40,6 +43,13 @@ export default function App() {
 
   const convo = useConversations(folderDir);
   const live = folderDir !== null && folderView === "trace";
+
+  const ann = useAnnotations(label);
+  const knownTags = useMemo(
+    () =>
+      [...new Set(Object.values(ann.annotations).map((a) => a.tag).filter((t): t is string => !!t))],
+    [ann.annotations],
+  );
 
   const onLoad = (t: ParsedTrace, lbl: string, source: string) => {
     setTrace(t);
@@ -265,6 +275,15 @@ export default function App() {
     if (live && following) setFollowing(false);
   }, [live, following]);
 
+  const onAnnotationSelect = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      setActiveView("tree");
+      if (live) setFollowing(false);
+    },
+    [live],
+  );
+
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
   const filtering = query.trim().length > 0;
   const currentMatchId =
@@ -336,19 +355,28 @@ export default function App() {
                 query={query}
                 followId={live && following ? selectedId : null}
                 onUserScroll={onUserScroll}
+                annotations={ann.annotations}
               />
             )}
             {activeView === "flamegraph" && (
               <FlamegraphView trace={trace} selectedId={selectedId} onSelect={onSpanSelect} />
             )}
             {activeView === "diff" && <DiffView trace={trace} label={label} />}
+            {activeView === "annotations" && (
+              <AnnotationsView annotations={ann.annotations} label={label} onSelect={onAnnotationSelect} />
+            )}
             {live && !following && (
               <BackToLivePill newRun={pendingRun !== null} onClick={goLive} />
             )}
           </section>
           <aside className="min-h-0 overflow-auto bg-bg">
             {selected ? (
-              <SpanDetail node={selected} />
+              <SpanDetail
+                node={selected}
+                annotation={ann.annotations[selected.spanId]}
+                onAnnotate={(a: Annotation) => ann.setAnnotation(selected, a)}
+                knownTags={knownTags}
+              />
             ) : (
               <div className="p-6 text-sm text-muted">Select a span to inspect it.</div>
             )}
