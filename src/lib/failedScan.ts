@@ -1,4 +1,3 @@
-export type FailedState = "ok" | "failed" | "skipped" | "unknown";
 export const MAX_SCAN_BYTES = 30 * 1024 * 1024;
 
 const KEY = "tracelens:failed";
@@ -16,20 +15,20 @@ function storageOf(s?: Storage): Storage | null {
   }
 }
 
-export function loadFailedCache(s?: Storage): Record<string, FailedState> {
+export function loadFailedCache(s?: Storage): Record<string, number> {
   const storage = storageOf(s);
   if (!storage) return {};
   try {
     const raw = storage.getItem(KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, FailedState>) : {};
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, number>) : {};
   } catch {
     return {};
   }
 }
 
-export function saveFailedCache(cache: Record<string, FailedState>, s?: Storage): void {
+export function saveFailedCache(cache: Record<string, number>, s?: Storage): void {
   const storage = storageOf(s);
   if (!storage) return;
   try {

@@ -19,8 +19,8 @@ describe("failedScan cache", () => {
   });
   it("round-trips and tolerates missing/corrupt", () => {
     const s = fakeStorage();
-    saveFailedCache({ "a:1": "failed", "b:2": "ok" }, s);
-    expect(loadFailedCache(s)).toEqual({ "a:1": "failed", "b:2": "ok" });
+    saveFailedCache({ "a:1": 3, "b:2": 0 }, s); // error counts
+    expect(loadFailedCache(s)).toEqual({ "a:1": 3, "b:2": 0 });
     expect(loadFailedCache(fakeStorage())).toEqual({});
     expect(loadFailedCache(fakeStorage({ "tracelens:failed": "nope" }))).toEqual({});
   });

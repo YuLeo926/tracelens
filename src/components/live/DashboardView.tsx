@@ -1,11 +1,11 @@
 import type { DashboardModel } from "../../core/folderStats";
 import type { Conversation } from "../../hooks/useConversations";
-import type { ScanState } from "../../hooks/useFailedScan";
+import type { RunErrors } from "../../hooks/useFailedScan";
 import { formatTokens, formatCost, formatRelativeTime } from "../../core/format";
 
 interface Props {
   model: DashboardModel;
-  failed: { states: Map<string, ScanState>; done: number; total: number };
+  failed: { errors: Map<string, RunErrors>; done: number; total: number };
   conversations: Conversation[];
   onOpen: (name: string) => void;
   onPickProject: (project: string) => void;
@@ -22,11 +22,14 @@ function Card({ label, value }: { label: string; value: string }) {
 
 export function DashboardView({ model, failed, conversations, onOpen, onPickProject }: Props) {
   const now = Date.now();
-  const failedCount = [...failed.states.values()].filter((s) => s === "failed").length;
-  const skipped = [...failed.states.values()].filter((s) => s === "skipped").length;
+  const errorRuns = conversations
+    .map((c) => ({ c, errors: failed.errors.get(c.name) }))
+    .filter((x): x is { c: Conversation; errors: number } => typeof x.errors === "number" && x.errors > 0)
+    .sort((a, b) => b.errors - a.errors);
+  const withErrors = errorRuns.length;
+  const skipped = [...failed.errors.values()].filter((v) => v === "skipped").length;
   const scanning = failed.done < failed.total;
   const maxDay = Math.max(1, ...model.activity.map((d) => d.count));
-  const failedConvos = conversations.filter((c) => failed.states.get(c.name) === "failed");
 
   return (
     <div className="min-h-0 flex-1 overflow-auto p-4">
@@ -34,7 +37,7 @@ export function DashboardView({ model, failed, conversations, onOpen, onPickProj
         <Card label="Conversations" value={String(model.conversationCount)} />
         <Card label="Tokens (in / out)" value={`${formatTokens(model.totalTokensIn)} / ${formatTokens(model.totalTokensOut)}`} />
         <Card label="Est. cost" value={`≈ ${formatCost(model.estCostUsd)}`} />
-        <Card label="Failed runs" value={`${failedCount}${scanning ? ` · ${failed.done}/${failed.total}` : ""}`} />
+        <Card label="Runs with errors" value={`${withErrors}${scanning ? ` · ${failed.done}/${failed.total}` : ""}`} />
       </div>
 
       <div className="mt-6">
@@ -73,24 +76,32 @@ export function DashboardView({ model, failed, conversations, onOpen, onPickProj
 
       <div className="mt-6">
         <h3 className="mb-2 text-[11px] uppercase tracking-wider text-faint">
-          Failed runs{scanning ? ` · analyzing ${failed.done}/${failed.total}` : ""}
+          Runs with errors{scanning ? ` · analyzing ${failed.done}/${failed.total}` : ""}
           {skipped > 0 ? ` · ${skipped} too large, not analyzed` : ""}
         </h3>
-        {failedConvos.length === 0 ? (
+        <p className="mb-2 text-[11px] text-faint">
+          Runs where some command returned a non-zero exit — most are normal (a probe, a no-match grep); high counts are worth a look.
+        </p>
+        {errorRuns.length === 0 ? (
           <div className="rounded-lg border border-border p-4 text-sm text-muted">
-            {scanning ? "Analyzing…" : "No failed runs found."}
+            {scanning ? "Analyzing…" : "No runs with errors."}
           </div>
         ) : (
           <ul className="rounded-lg border border-border">
-            {failedConvos.map((c) => (
+            {errorRuns.map(({ c, errors }) => (
               <li key={c.name} className="border-b border-border last:border-0">
                 <button
                   type="button"
                   onClick={() => onOpen(c.name)}
-                  className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-panel-2"
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-panel-2"
                 >
-                  <span className="truncate text-[13px] text-text">{c.title ?? c.name}</span>
-                  <span className="mono text-[11px] text-faint">{c.project ?? "—"} · {formatRelativeTime(c.lastModified, now)}</span>
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] text-text">{c.title ?? c.name}</span>
+                    <span className="mono text-[11px] text-faint">{c.project ?? "—"} · {formatRelativeTime(c.lastModified, now)}</span>
+                  </div>
+                  <span className="mono shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">
+                    {errors} error{errors === 1 ? "" : "s"}
+                  </span>
                 </button>
               </li>
             ))}

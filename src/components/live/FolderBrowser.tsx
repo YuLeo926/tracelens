@@ -4,7 +4,7 @@ import { ConversationList } from "./ConversationList";
 import { DashboardView } from "./DashboardView";
 import type { Conversation } from "../../hooks/useConversations";
 import type { DashboardModel } from "../../core/folderStats";
-import type { ScanState } from "../../hooks/useFailedScan";
+import type { RunErrors } from "../../hooks/useFailedScan";
 
 interface Props {
   folderName: string;
@@ -12,7 +12,7 @@ interface Props {
   loading: boolean;
   error: boolean;
   dashboard: DashboardModel;
-  failed: { states: Map<string, ScanState>; done: number; total: number };
+  failed: { errors: Map<string, RunErrors>; done: number; total: number };
   onOpen: (name: string) => void;
   onFollowNewest: () => void;
   onClose: () => void;
