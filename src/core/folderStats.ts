@@ -3,7 +3,8 @@ export interface ConvStat {
   project?: string;
   startMs?: number;
   lastModified: number;
-  tokensIn?: number;
+  tokensIn?: number;     // total prompt tokens (INCLUDING cached)
+  cachedIn?: number;     // the cached subset of tokensIn (billed ~10x cheaper)
   tokensOut?: number;
   model?: string;
   sizeBytes: number;
@@ -15,6 +16,7 @@ export interface DayBar { day: string; count: number; }
 export interface DashboardModel {
   conversationCount: number;
   totalTokensIn: number;
+  totalCachedIn: number;
   totalTokensOut: number;
   estCostUsd: number;
   projects: ProjectRow[];
@@ -35,16 +37,23 @@ function parseLines(text: string): unknown[] {
   return out;
 }
 
-/** Codex cumulative tokens = the LAST token_count event in the tail. */
-export function extractTokens(tail: string): { tokensIn: number; tokensOut: number } | null {
-  let found: { tokensIn: number; tokensOut: number } | null = null;
+/** Codex cumulative tokens = the LAST token_count event in the tail.
+ *  `input_tokens` is the TOTAL prompt (Codex re-sends context each turn), of
+ *  which `cached_input_tokens` is the cheap cached subset. */
+export function extractTokens(
+  tail: string,
+): { tokensIn: number; tokensOut: number; cachedIn: number } | null {
+  let found: { tokensIn: number; tokensOut: number; cachedIn: number } | null = null;
   for (const r of parseLines(tail)) {
     const p = (r as { payload?: { type?: unknown; info?: { total_token_usage?: Record<string, unknown> } } }).payload;
     if (p?.type === "token_count") {
       const u = p.info?.total_token_usage ?? {};
-      const tokensIn = typeof u.input_tokens === "number" ? u.input_tokens : 0;
-      const tokensOut = typeof u.output_tokens === "number" ? u.output_tokens : 0;
-      found = { tokensIn, tokensOut };
+      const num = (v: unknown) => (typeof v === "number" ? v : 0);
+      found = {
+        tokensIn: num(u.input_tokens),
+        tokensOut: num(u.output_tokens),
+        cachedIn: num(u.cached_input_tokens),
+      };
     }
   }
   return found;
@@ -72,16 +81,24 @@ export function modelOf(head: string): string | undefined {
 }
 
 // Rough USD per 1M tokens. Estimates only — update here if prices change.
-const PRICES: Array<{ match: RegExp; inUsd: number; outUsd: number }> = [
-  { match: /gpt-5/i, inUsd: 1.25, outUsd: 10 },
-  { match: /gpt-4|o4|o3/i, inUsd: 2.5, outUsd: 10 },
-  { match: /claude/i, inUsd: 3, outUsd: 15 },
+// `cachedUsd` is the (much cheaper) rate for cached/re-sent input.
+const PRICES: Array<{ match: RegExp; inUsd: number; cachedUsd: number; outUsd: number }> = [
+  { match: /gpt-5/i, inUsd: 1.25, cachedUsd: 0.125, outUsd: 10 },
+  { match: /gpt-4|o4|o3/i, inUsd: 2.5, cachedUsd: 0.25, outUsd: 10 },
+  { match: /claude/i, inUsd: 3, cachedUsd: 0.3, outUsd: 15 },
 ];
-const FALLBACK = { inUsd: 2, outUsd: 10 };
+const FALLBACK = { inUsd: 2, cachedUsd: 0.2, outUsd: 10 };
 
-export function estimateCostUsd(tokensIn: number, tokensOut: number, model?: string): number {
+/** Estimate cost, pricing the cached input subset ~10x cheaper than fresh input. */
+export function estimateCostUsd(
+  tokensIn: number,
+  tokensOut: number,
+  cachedIn: number,
+  model?: string,
+): number {
   const rate = (model && PRICES.find((p) => p.match.test(model))) || FALLBACK;
-  return (tokensIn / 1e6) * rate.inUsd + (tokensOut / 1e6) * rate.outUsd;
+  const freshIn = Math.max(0, tokensIn - cachedIn);
+  return (freshIn / 1e6) * rate.inUsd + (cachedIn / 1e6) * rate.cachedUsd + (tokensOut / 1e6) * rate.outUsd;
 }
 
 function ymd(ms: number): string {
@@ -90,6 +107,7 @@ function ymd(ms: number): string {
 
 export function aggregateDashboard(stats: ConvStat[], now: number): DashboardModel {
   let totalTokensIn = 0;
+  let totalCachedIn = 0;
   let totalTokensOut = 0;
   let estCostUsd = 0;
   const byProject = new Map<string, ProjectRow>();
@@ -97,10 +115,12 @@ export function aggregateDashboard(stats: ConvStat[], now: number): DashboardMod
 
   for (const s of stats) {
     const tIn = s.tokensIn ?? 0;
+    const cIn = s.cachedIn ?? 0;
     const tOut = s.tokensOut ?? 0;
     totalTokensIn += tIn;
+    totalCachedIn += cIn;
     totalTokensOut += tOut;
-    estCostUsd += estimateCostUsd(tIn, tOut, s.model);
+    estCostUsd += estimateCostUsd(tIn, tOut, cIn, s.model);
 
     const project = s.project ?? "(unknown)";
     const row = byProject.get(project) ?? { project, count: 0, tokens: 0, lastActive: 0 };
@@ -124,6 +144,7 @@ export function aggregateDashboard(stats: ConvStat[], now: number): DashboardMod
   return {
     conversationCount: stats.length,
     totalTokensIn,
+    totalCachedIn,
     totalTokensOut,
     estCostUsd,
     projects,

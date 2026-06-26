@@ -12,6 +12,7 @@ export interface Conversation {
   startMs?: number;
   model?: string;
   tokensIn?: number;
+  cachedIn?: number;
   tokensOut?: number;
 }
 
@@ -66,6 +67,7 @@ export function useConversations(dir: FileSystemDirectoryHandle | null): Result 
             startMs: startMsOf(head),
             model: modelOf(head),
             tokensIn: tokens?.tokensIn,
+            cachedIn: tokens?.cachedIn,
             tokensOut: tokens?.tokensOut,
           };
         } catch {

@@ -7,9 +7,9 @@ describe("extractTokens", () => {
   it("sums the LAST token_count event in the tail", () => {
     const tail = lines(
       { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 10, output_tokens: 2 } } } },
-      { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, output_tokens: 20 } } } },
+      { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 70, output_tokens: 20 } } } },
     );
-    expect(extractTokens(tail)).toEqual({ tokensIn: 100, tokensOut: 20 });
+    expect(extractTokens(tail)).toEqual({ tokensIn: 100, tokensOut: 20, cachedIn: 70 });
   });
   it("returns null when there is no token_count (ignores a partial first line)", () => {
     expect(extractTokens('truncated...\n{"type":"event_msg","payload":{"type":"other"}}')).toBeNull();
@@ -33,11 +33,17 @@ describe("startMsOf / modelOf", () => {
 
 describe("estimateCostUsd", () => {
   it("uses a per-model rate and a fallback", () => {
-    const gpt = estimateCostUsd(1_000_000, 1_000_000, "gpt-5.5");
-    const fallback = estimateCostUsd(1_000_000, 1_000_000, "mystery-model");
+    const gpt = estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.5");
+    const fallback = estimateCostUsd(1_000_000, 1_000_000, 0, "mystery-model");
     expect(gpt).toBeGreaterThan(0);
     expect(fallback).toBeGreaterThan(0);
-    expect(estimateCostUsd(0, 0, "gpt-5.5")).toBe(0);
+    expect(estimateCostUsd(0, 0, 0, "gpt-5.5")).toBe(0);
+  });
+  it("prices cached input far cheaper than fresh input", () => {
+    const allFresh = estimateCostUsd(1_000_000, 0, 0, "gpt-5.5");
+    const allCached = estimateCostUsd(1_000_000, 0, 1_000_000, "gpt-5.5");
+    expect(allCached).toBeLessThan(allFresh);
+    expect(allCached).toBeCloseTo(allFresh * 0.1, 5); // ~10x cheaper
   });
 });
 
@@ -45,7 +51,7 @@ describe("aggregateDashboard", () => {
   const now = Date.parse("2026-06-21T12:00:00.000Z");
   const day = 86_400_000;
   const stats: ConvStat[] = [
-    { name: "a", project: "ebay", lastModified: now, startMs: now, tokensIn: 100, tokensOut: 20, model: "gpt-5.5", sizeBytes: 10 },
+    { name: "a", project: "ebay", lastModified: now, startMs: now, tokensIn: 100, cachedIn: 60, tokensOut: 20, model: "gpt-5.5", sizeBytes: 10 },
     { name: "b", project: "ebay", lastModified: now - day, startMs: now - day, tokensIn: 50, tokensOut: 5, sizeBytes: 10 },
     { name: "c", lastModified: now - 2 * day, startMs: now - 2 * day, tokensIn: 0, tokensOut: 0, sizeBytes: 10 },
   ];
@@ -53,6 +59,7 @@ describe("aggregateDashboard", () => {
     const d = aggregateDashboard(stats, now);
     expect(d.conversationCount).toBe(3);
     expect(d.totalTokensIn).toBe(150);
+    expect(d.totalCachedIn).toBe(60);
     expect(d.totalTokensOut).toBe(25);
     expect(d.estCostUsd).toBeGreaterThan(0);
     expect(d.projects.map((p) => p.project)).toEqual(["ebay", "(unknown)"]); // ebay most recent

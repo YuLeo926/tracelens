@@ -11,11 +11,12 @@ interface Props {
   onPickProject: (project: string) => void;
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+function Card({ label, value, caption }: { label: string; value: string; caption?: string }) {
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-border bg-panel px-4 py-3">
       <span className="text-[10px] uppercase tracking-wider text-faint">{label}</span>
       <span className="text-lg text-text">{value}</span>
+      {caption && <span className="text-[11px] text-faint">{caption}</span>}
     </div>
   );
 }
@@ -35,8 +36,16 @@ export function DashboardView({ model, failed, conversations, onOpen, onPickProj
     <div className="min-h-0 flex-1 overflow-auto p-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card label="Conversations" value={String(model.conversationCount)} />
-        <Card label="Tokens (in / out)" value={`${formatTokens(model.totalTokensIn)} / ${formatTokens(model.totalTokensOut)}`} />
-        <Card label="Est. cost" value={`≈ ${formatCost(model.estCostUsd)}`} />
+        <Card
+          label="Tokens (in / out)"
+          value={`${formatTokens(model.totalTokensIn)} / ${formatTokens(model.totalTokensOut)}`}
+          caption={
+            model.totalTokensIn > 0
+              ? `${Math.round((model.totalCachedIn / model.totalTokensIn) * 100)}% of input cached/re-sent`
+              : undefined
+          }
+        />
+        <Card label="Est. cost" value={`≈ ${formatCost(model.estCostUsd)}`} caption="rough estimate" />
         <Card label="Runs with errors" value={`${withErrors}${scanning ? ` · ${failed.done}/${failed.total}` : ""}`} />
       </div>
 
