@@ -2,8 +2,8 @@ export const MAX_SCAN_BYTES = 30 * 1024 * 1024;
 
 const KEY = "tracelens:failed";
 
-export function cacheKey(name: string, lastModified: number): string {
-  return `${name}:${lastModified}`;
+export function cacheKey(folderScope: string, name: string, lastModified: number, sizeBytes: number): string {
+  return `${folderScope}:${name}:${lastModified}:${sizeBytes}`;
 }
 
 function storageOf(s?: Storage): Storage | null {

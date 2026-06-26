@@ -34,11 +34,12 @@ export function useFailedScan(
     }
     let cancelled = false;
     const cache = loadFailedCache();
+    const folderScope = dir.name || "(folder)";
     const next = new Map<string, RunErrors>();
     const toScan: Conversation[] = [];
 
     for (const c of conversations) {
-      const key = cacheKey(c.name, c.lastModified);
+      const key = cacheKey(folderScope, c.name, c.lastModified, c.sizeBytes);
       if (typeof cache[key] === "number") next.set(c.name, cache[key]);
       else if (c.sizeBytes > MAX_SCAN_BYTES) next.set(c.name, "skipped");
       else {
@@ -64,7 +65,7 @@ export function useFailedScan(
         setErrors(new Map(next));
         setDone((d) => d + 1);
         if (typeof result === "number") {
-          cache[cacheKey(c.name, c.lastModified)] = result;
+          cache[cacheKey(folderScope, c.name, c.lastModified, c.sizeBytes)] = result;
           saveFailedCache(cache);
         }
       }

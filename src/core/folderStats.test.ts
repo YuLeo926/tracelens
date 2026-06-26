@@ -14,6 +14,25 @@ describe("extractTokens", () => {
   it("returns null when there is no token_count (ignores a partial first line)", () => {
     expect(extractTokens('truncated...\n{"type":"event_msg","payload":{"type":"other"}}')).toBeNull();
   });
+  it("sums Claude Code message usage, including cache read/write tokens", () => {
+    const tail = lines(
+      { type: "assistant", message: { role: "assistant", model: "claude-haiku-4-5", usage: { input_tokens: 30, cache_read_input_tokens: 300, cache_creation_input_tokens: 20, output_tokens: 12 } } },
+      { type: "assistant", message: { role: "assistant", model: "claude-haiku-4-5", usage: { input_tokens: 40, cache_read_input_tokens: 100, output_tokens: 5 } } },
+    );
+    expect(extractTokens(tail)).toEqual({
+      tokensIn: 490,
+      tokensOut: 17,
+      cachedIn: 400,
+      cacheWriteIn: 20,
+    });
+  });
+  it("sums Claude API usage from a JSON array file", () => {
+    const tail = JSON.stringify([
+      { response: { model: "claude-sonnet-4-6", usage: { input_tokens: 100, output_tokens: 20 } } },
+      { response: { model: "claude-sonnet-4-6", usage: { input_tokens: 200, cache_read_input_tokens: 50, output_tokens: 30 } } },
+    ]);
+    expect(extractTokens(tail)).toEqual({ tokensIn: 350, tokensOut: 50, cachedIn: 50, cacheWriteIn: 0 });
+  });
 });
 
 describe("startMsOf / modelOf", () => {
@@ -25,6 +44,19 @@ describe("startMsOf / modelOf", () => {
     expect(startMsOf(head)).toBe(Date.parse("2026-06-21T10:00:00.000Z"));
     expect(modelOf(head)).toBe("gpt-5.5");
   });
+  it("reads Claude Code models from message.model", () => {
+    const head = lines(
+      { type: "user", timestamp: "2026-06-21T10:00:00.000Z", message: { role: "user", content: "hi" } },
+      { type: "assistant", timestamp: "2026-06-21T10:00:01.000Z", message: { role: "assistant", model: "claude-haiku-4-5-20251001", content: [{ type: "text", text: "hello" }] } },
+    );
+    expect(modelOf(head)).toBe("claude-haiku-4-5-20251001");
+  });
+  it("reads models from a JSON array file", () => {
+    const head = JSON.stringify([
+      { request: { model: "claude-sonnet-4-6" }, response: { usage: { input_tokens: 1 } } },
+    ]);
+    expect(modelOf(head)).toBe("claude-sonnet-4-6");
+  });
   it("returns undefined when absent", () => {
     expect(startMsOf("{}")).toBeUndefined();
     expect(modelOf("{}")).toBeUndefined();
@@ -32,18 +64,31 @@ describe("startMsOf / modelOf", () => {
 });
 
 describe("estimateCostUsd", () => {
-  it("uses a per-model rate and a fallback", () => {
-    const gpt = estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.5");
-    const fallback = estimateCostUsd(1_000_000, 1_000_000, 0, "mystery-model");
-    expect(gpt).toBeGreaterThan(0);
-    expect(fallback).toBeGreaterThan(0);
+  it("uses current OpenAI model-specific rates instead of a broad GPT-5 bucket", () => {
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.5")).toBeCloseTo(35);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.4")).toBeCloseTo(17.5);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.4-mini")).toBeCloseTo(5.25);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.4-nano")).toBeCloseTo(1.45);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.3-codex")).toBeCloseTo(15.75);
     expect(estimateCostUsd(0, 0, 0, "gpt-5.5")).toBe(0);
+  });
+  it("uses current Claude family-specific rates", () => {
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-haiku-4-5")).toBeCloseTo(6);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-sonnet-4-6")).toBeCloseTo(18);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-opus-4-6")).toBeCloseTo(30);
   });
   it("prices cached input far cheaper than fresh input", () => {
     const allFresh = estimateCostUsd(1_000_000, 0, 0, "gpt-5.5");
     const allCached = estimateCostUsd(1_000_000, 0, 1_000_000, "gpt-5.5");
     expect(allCached).toBeLessThan(allFresh);
     expect(allCached).toBeCloseTo(allFresh * 0.1, 5); // ~10x cheaper
+  });
+  it("prices Claude cache writes separately from cache reads", () => {
+    expect(estimateCostUsd(1_000_000, 0, 0, "claude-sonnet-4-6", 1_000_000)).toBeCloseTo(3.75);
+    expect(estimateCostUsd(1_000_000, 0, 1_000_000, "claude-sonnet-4-6", 0)).toBeCloseTo(0.3);
+  });
+  it("clamps cached input to the available input total", () => {
+    expect(estimateCostUsd(10, 0, 100, "gpt-5.5")).toBeCloseTo(0.000005);
   });
 });
 
@@ -67,5 +112,18 @@ describe("aggregateDashboard", () => {
     expect(d.activity).toHaveLength(14);
     expect(d.activity[d.activity.length - 1].count).toBe(1); // today
     expect(d.activity.reduce((n, b) => n + b.count, 0)).toBe(3);
+  });
+  it("buckets activity by local calendar day", () => {
+    const localStart = new Date(2026, 5, 21, 0, 30, 0, 0).getTime();
+    const d = aggregateDashboard(
+      [{ name: "local", lastModified: localStart, startMs: localStart, sizeBytes: 1 }],
+      localStart,
+    );
+    const localDay = [
+      new Date(localStart).getFullYear(),
+      String(new Date(localStart).getMonth() + 1).padStart(2, "0"),
+      String(new Date(localStart).getDate()).padStart(2, "0"),
+    ].join("-");
+    expect(d.activity[d.activity.length - 1]).toEqual({ day: localDay, count: 1 });
   });
 });

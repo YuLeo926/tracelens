@@ -17,7 +17,8 @@ export function formatTokens(n: number | undefined): string {
 }
 
 export function formatCost(usd: number | undefined): string {
-  if (!usd) return "—";
+  if (usd === undefined || !Number.isFinite(usd)) return "—";
+  if (usd === 0) return "$0.00";
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;
 }

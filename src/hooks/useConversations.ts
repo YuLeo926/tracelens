@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { scanTraceFiles, readHead, readTail } from "../lib/folderWatch";
 import { extractConversationMeta } from "../core/conversationMeta";
 import { startMsOf, modelOf, extractTokens } from "../core/folderStats";
+import { isTraceFileHead } from "../core/traceSniff";
 
 export interface Conversation {
   name: string;
@@ -13,6 +14,7 @@ export interface Conversation {
   model?: string;
   tokensIn?: number;
   cachedIn?: number;
+  cacheWriteIn?: number;
   tokensOut?: number;
 }
 
@@ -52,29 +54,35 @@ export function useConversations(dir: FileSystemDirectoryHandle | null): Result 
         return;
       }
       if (cancelled) return;
-      setConversations(
-        files.map((f) => ({ name: f.name, lastModified: f.lastModified, sizeBytes: f.sizeBytes })),
-      );
       for (const f of files) {
         if (cancelled) return;
-        let extra: Partial<Conversation> = {};
+        let row: Conversation | null = null;
         try {
           const head = await readHead(f.handle);
-          const tail = await readTail(f.handle);
-          const tokens = extractTokens(tail);
-          extra = {
+          if (!isTraceFileHead(f.name, head)) continue;
+          row = {
+            name: f.name,
+            lastModified: f.lastModified,
+            sizeBytes: f.sizeBytes,
             ...extractConversationMeta(head),
             startMs: startMsOf(head),
             model: modelOf(head),
-            tokensIn: tokens?.tokensIn,
-            cachedIn: tokens?.cachedIn,
-            tokensOut: tokens?.tokensOut,
           };
+          try {
+            const tail = await readTail(f.handle);
+            const tokens = extractTokens(tail);
+            row.tokensIn = tokens?.tokensIn;
+            row.cachedIn = tokens?.cachedIn;
+            row.cacheWriteIn = tokens?.cacheWriteIn;
+            row.tokensOut = tokens?.tokensOut;
+          } catch {
+            /* keep metadata-only row */
+          }
         } catch {
-          /* leave fields undefined for this row */
+          continue;
         }
         if (cancelled) return;
-        setConversations((prev) => prev.map((c) => (c.name === f.name ? { ...c, ...extra } : c)));
+        if (row) setConversations((prev) => [...prev, row]);
       }
       if (!cancelled) setLoading(false);
     })();

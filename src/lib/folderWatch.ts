@@ -36,7 +36,7 @@ export async function readHead(handle: FileSystemFileHandle, maxBytes = 262144):
 }
 
 /** Read just the LAST `maxBytes` of a file (cheap stats peek, e.g. token totals). */
-export async function readTail(handle: FileSystemFileHandle, maxBytes = 65536): Promise<string> {
+export async function readTail(handle: FileSystemFileHandle, maxBytes = 262144): Promise<string> {
   const file = await handle.getFile();
   const start = Math.max(0, file.size - maxBytes);
   return file.slice(start).text();

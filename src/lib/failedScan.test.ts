@@ -14,8 +14,8 @@ function fakeStorage(initial: Record<string, string> = {}): Storage {
 }
 
 describe("failedScan cache", () => {
-  it("keys by name + mtime", () => {
-    expect(cacheKey("a/b.jsonl", 123)).toBe("a/b.jsonl:123");
+  it("keys by folder scope + name + mtime + size", () => {
+    expect(cacheKey("sessions", "a/b.jsonl", 123, 456)).toBe("sessions:a/b.jsonl:123:456");
   });
   it("round-trips and tolerates missing/corrupt", () => {
     const s = fakeStorage();
