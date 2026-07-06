@@ -2,7 +2,7 @@
 
 **A local-first, zero-backend debugger for AI agent traces.** Drop in a trace — OpenInference, OTel/OTLP, Codex, or Claude Code — and get a readable call tree with timings, tokens, cost, and errors. Search it, flamegraph it, diff two runs, share it by link — like DevTools for a single agent run.
 
-[![live demo](https://img.shields.io/badge/demo-live-3DC9C0)](https://yuleo926.github.io/tracelens/) ![license](https://img.shields.io/badge/license-MIT-E8A23D) ![types](https://img.shields.io/badge/TypeScript-strict-3DC9C0) ![backend](https://img.shields.io/badge/backend-none-8B7CF6) ![status](https://img.shields.io/badge/status-v1-A78BFA)
+[![live demo](https://img.shields.io/badge/demo-live-3DC9C0)](https://yuleo926.github.io/tracelens/) ![license](https://img.shields.io/badge/license-MIT-E8A23D) ![types](https://img.shields.io/badge/TypeScript-strict-3DC9C0) ![backend](https://img.shields.io/badge/backend-none-8B7CF6) ![status](https://img.shields.io/badge/status-v2-A78BFA)
 
 **▶ [Try it live → yuleo926.github.io/tracelens](https://yuleo926.github.io/tracelens/)** — runs entirely in your browser, no install, nothing uploaded.
 
@@ -117,13 +117,16 @@ src/
 - ✅ Shareable export — a URL-encoded trace (and JSON download), so a teammate can open a failing run with one click
 - ✅ Import adapters — OTLP/OpenTelemetry, Codex (`exec --json` **and** saved session rollouts), and Claude (Messages logs **and** Claude Code transcripts), JSON or JSONL
 
-**v2 — watch runs live, and become a layer others build on.**
+**v2 — watch runs live. ✅ shipped.**
 - ✅ Live tail — watch a local agent-log folder (Codex / Claude Code) and follow the newest run as it's written, entirely in the browser (File System Access API, Chromium)
 - ✅ Conversation browser — open a folder and pick a conversation from a list labeled by its first message + project, instead of guessing at timestamp-UUID filenames
 - ✅ Span annotations — rate spans 👍/👎 with tags + notes (saved locally, auto-restored) and export them as JSONL/CSV evaluation datasets
 - ✅ Folder overview dashboard — a per-folder Overview tab: conversations, tokens, a cache-aware rough cost estimate, a 14-day activity timeline, by-project breakdown, and runs-with-errors
-- Publish the components as a headless, shadcn-style library to drop into any app
-- A Tauri desktop build for true push-based tailing and cross-browser support
+
+**Backlog — parked until there's real demand.**
+- Performance pass for very large logs — incremental tail reads + list virtualization, for when huge session files start to feel slow
+- Headless component library — publish the views as a shadcn-style package to embed in other apps. Want this? [Open an issue](https://github.com/YuLeo926/tracelens/issues).
+- Tauri desktop build — true push-based tailing and non-Chromium support, if the browser version ever falls short
 
 ## Renaming the project
 
