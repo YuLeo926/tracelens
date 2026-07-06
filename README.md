@@ -6,6 +6,11 @@
 
 **▶ [Try it live → yuleo926.github.io/tracelens](https://yuleo926.github.io/tracelens/)** — runs entirely in your browser, no install, nothing uploaded.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.png">
+  <img src="docs/hero-light.png" alt="Tracelens — call tree with inline waterfall, run summary, and a span detail panel with annotations" width="100%">
+</picture>
+
 ---
 
 ## Why
