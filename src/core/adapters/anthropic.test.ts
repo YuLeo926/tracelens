@@ -65,3 +65,51 @@ describe("anthropicAdapter — Claude Code transcript", () => {
     expect(t.summary.errors).toBe(1);
   });
 });
+
+const CCT = [
+  { type: "user", timestamp: "2026-07-15T09:00:00.000Z", sessionId: "cc-t", message: { role: "user", content: "Why?" } },
+  {
+    type: "assistant",
+    timestamp: "2026-07-15T09:00:01.000Z",
+    message: {
+      role: "assistant",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 10, output_tokens: 8 },
+      content: [
+        { type: "thinking", thinking: "The user wants X; I should check Y first.", signature: "sig-abc" },
+        { type: "thinking", thinking: "", signature: "sig-empty" },
+        { type: "text", text: "Checking Y." },
+      ],
+    },
+  },
+  {
+    type: "assistant",
+    timestamp: "2026-07-15T09:00:02.000Z",
+    message: { role: "assistant", model: "claude-sonnet-5", content: [{ type: "redacted_thinking", data: "b64==" }] },
+  },
+];
+
+describe("anthropicAdapter — Claude Code thinking blocks", () => {
+  it("emits a thinking span (kind LLM, text in output) before the same message's text span", () => {
+    const t = parseTrace(CCT);
+    const nodes = flatten(t.roots);
+    const names = nodes.map((n) => n.name);
+    expect(names.indexOf("thinking")).toBeLessThan(names.indexOf("assistant"));
+    const think = nodes.find((n) => n.name === "thinking")!;
+    expect(think.kind).toBe("llm");
+    expect(think.output).toBe("The user wants X; I should check Y first.");
+    expect(think.model).toBe("claude-sonnet-5");
+  });
+
+  it("skips empty thinking; placeholders redacted_thinking", () => {
+    const t = parseTrace(CCT);
+    const thinks = flatten(t.roots).filter((n) => n.name === "thinking");
+    expect(thinks).toHaveLength(2); // non-empty + redacted placeholder; the empty block is dropped
+    expect(thinks[1].output).toContain("Encrypted thinking");
+  });
+
+  it("emits no thinking spans for a transcript without thinking", () => {
+    const t = parseTrace(CC);
+    expect(flatten(t.roots).some((n) => n.name === "thinking")).toBe(false);
+  });
+});

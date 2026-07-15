@@ -83,6 +83,7 @@ function messagesLogToLooseSpans(entries: LogEntry[]): LooseSpan[] {
 interface ClaudeBlock {
   type?: string;
   text?: string;
+  thinking?: string;
   id?: string;
   name?: string;
   input?: unknown;
@@ -199,6 +200,40 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
               "input.value": JSON.stringify(b.input, null, 2),
               ...(r?.output !== undefined ? { "output.value": r.output } : {}),
               "claude.item": b,
+            },
+          },
+        });
+      } else if (b.type === "thinking" && typeof b.thinking === "string" && b.thinking.trim()) {
+        spans.push({
+          ts,
+          span: {
+            span_id: `cc-think-${spans.length}`,
+            parent_span_id: rootId,
+            name: "thinking",
+            status_code: "OK",
+            start_time: ts,
+            end_time: ts,
+            attributes: {
+              "openinference.span.kind": "LLM",
+              "gen_ai.request.model": ln.message?.model,
+              "output.value": b.thinking,
+            },
+          },
+        });
+      } else if (b.type === "redacted_thinking") {
+        spans.push({
+          ts,
+          span: {
+            span_id: `cc-think-${spans.length}`,
+            parent_span_id: rootId,
+            name: "thinking",
+            status_code: "OK",
+            start_time: ts,
+            end_time: ts,
+            attributes: {
+              "openinference.span.kind": "LLM",
+              "gen_ai.request.model": ln.message?.model,
+              "output.value": "[Encrypted thinking — content not available]",
             },
           },
         });
