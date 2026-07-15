@@ -113,3 +113,28 @@ describe("codexAdapter — non-string tool outputs", () => {
     expect(span.status).toBe("ok");
   });
 });
+
+const ROLLOUT_THINK = [
+  { timestamp: "2026-07-15T09:00:00.000Z", type: "session_meta", payload: { id: "sess-t" } },
+  { timestamp: "2026-07-15T09:00:01.000Z", type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "**Plan**" }, { type: "summary_text", text: "Check files first." }], content: null, encrypted_content: "gAAA" } },
+  { timestamp: "2026-07-15T09:00:02.000Z", type: "response_item", payload: { type: "function_call", name: "shell_command", arguments: '{"command":"ls"}', call_id: "call_t1" } },
+  { timestamp: "2026-07-15T09:00:02.500Z", type: "response_item", payload: { type: "function_call_output", call_id: "call_t1", output: "Exit code: 0\nsrc" } },
+  { timestamp: "2026-07-15T09:00:03.000Z", type: "response_item", payload: { type: "reasoning", summary: [], content: null, encrypted_content: "gBBB" } },
+  { timestamp: "2026-07-15T09:00:04.000Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Done." }] } },
+];
+
+describe("codexAdapter — rollout reasoning items", () => {
+  it("emits a reasoning span (kind LLM) with the joined summary text", () => {
+    const nodes = flatten(parseTrace(ROLLOUT_THINK).roots);
+    const think = nodes.find((n) => n.name === "reasoning")!;
+    expect(think.kind).toBe("llm");
+    expect(think.output).toBe("**Plan**\n\nCheck files first.");
+  });
+
+  it("skips encrypted-only reasoning (empty summary) and orders by timestamp", () => {
+    const nodes = flatten(parseTrace(ROLLOUT_THINK).roots);
+    expect(nodes.filter((n) => n.name === "reasoning")).toHaveLength(1);
+    const names = nodes.map((n) => n.name);
+    expect(names.indexOf("reasoning")).toBeLessThan(names.indexOf("shell_command"));
+  });
+});

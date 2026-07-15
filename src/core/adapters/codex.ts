@@ -161,6 +161,18 @@ function callOutputText(output: unknown): string | undefined {
   return undefined;
 }
 
+// A rollout `reasoning` item's readable text lives only in `summary`
+// ({ type: "summary_text", text } blocks); `content` is null and
+// `encrypted_content` cannot be decoded, so encrypted-only items yield nothing.
+function reasoningSummaryText(summary: unknown): string | undefined {
+  if (!Array.isArray(summary)) return undefined;
+  const texts = summary
+    .map((b) => (b && typeof b === "object" ? (b as { text?: unknown }).text : undefined))
+    .filter((x): x is string => typeof x === "string");
+  const joined = texts.join("\n\n").trim();
+  return joined || undefined;
+}
+
 function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
   let sessionId: string | undefined;
   let model: string | undefined;
@@ -172,6 +184,7 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
   const outputs = new Map<string, { output?: string; ts: number }>();
   const calls: Array<{ callId: string; name?: string; args?: string; ts: number }> = [];
   const messages: Array<{ text?: string; ts: number }> = [];
+  const reasonings: Array<{ text: string; ts: number }> = [];
 
   events.forEach((ev, i) => {
     const ts = tsToMs(ev.timestamp, i);
@@ -193,6 +206,9 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
         outputs.set(String(p.call_id), { output: callOutputText(p.output), ts });
       } else if (p.type === "message" && p.role === "assistant") {
         messages.push({ text: outputText(p.content), ts });
+      } else if (p.type === "reasoning") {
+        const text = reasoningSummaryText(p.summary);
+        if (text !== undefined) reasonings.push({ text, ts });
       }
     }
   });
@@ -242,6 +258,23 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
         attributes: {
           "openinference.span.kind": "LLM",
           ...(msg.text !== undefined ? { "output.value": msg.text } : {}),
+        },
+      },
+    });
+  });
+  reasonings.forEach((r, k) => {
+    spans.push({
+      ts: r.ts,
+      span: {
+        span_id: `codex-think-${k}`,
+        parent_span_id: rootId,
+        name: "reasoning",
+        status_code: "OK",
+        start_time: r.ts,
+        end_time: r.ts,
+        attributes: {
+          "openinference.span.kind": "LLM",
+          "output.value": r.text,
         },
       },
     });
