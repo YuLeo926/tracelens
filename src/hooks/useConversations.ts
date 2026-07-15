@@ -15,6 +15,7 @@ export interface Conversation {
   tokensIn?: number;
   cachedIn?: number;
   cacheWriteIn?: number;
+  cacheWrite1hIn?: number;
   tokensOut?: number;
 }
 
@@ -74,6 +75,7 @@ export function useConversations(dir: FileSystemDirectoryHandle | null): Result 
             row.tokensIn = tokens?.tokensIn;
             row.cachedIn = tokens?.cachedIn;
             row.cacheWriteIn = tokens?.cacheWriteIn;
+            row.cacheWrite1hIn = tokens?.cacheWrite1hIn;
             row.tokensOut = tokens?.tokensOut;
           } catch {
             /* keep metadata-only row */

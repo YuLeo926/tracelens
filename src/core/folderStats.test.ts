@@ -33,6 +33,30 @@ describe("extractTokens", () => {
     ]);
     expect(extractTokens(tail)).toEqual({ tokensIn: 350, tokensOut: 50, cachedIn: 50, cacheWriteIn: 0 });
   });
+  it("retains the one-hour subset of Claude cache creation tokens", () => {
+    const tail = lines({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        usage: {
+          input_tokens: 10,
+          cache_creation_input_tokens: 300,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 100,
+            ephemeral_1h_input_tokens: 200,
+          },
+          output_tokens: 2,
+        },
+      },
+    });
+    expect(extractTokens(tail)).toEqual({
+      tokensIn: 310,
+      tokensOut: 2,
+      cachedIn: 0,
+      cacheWriteIn: 300,
+      cacheWrite1hIn: 200,
+    });
+  });
 });
 
 describe("startMsOf / modelOf", () => {
@@ -72,10 +96,29 @@ describe("estimateCostUsd", () => {
     expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.3-codex")).toBeCloseTo(15.75);
     expect(estimateCostUsd(0, 0, 0, "gpt-5.5")).toBe(0);
   });
+  it("uses current GPT-5.6 and GPT-5.4 Pro standard rates", () => {
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.6")).toBeCloseTo(35);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.6-sol")).toBeCloseTo(35);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.6-terra")).toBeCloseTo(17.5);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.6-luna")).toBeCloseTo(7);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.4-pro")).toBeCloseTo(210);
+  });
   it("uses current Claude family-specific rates", () => {
     expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-haiku-4-5")).toBeCloseTo(6);
     expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-sonnet-4-6")).toBeCloseTo(18);
     expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-opus-4-6")).toBeCloseTo(30);
+  });
+  it("uses specific current and legacy Claude model rates", () => {
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-fable-5")).toBeCloseTo(60);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-mythos-5")).toBeCloseTo(60);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-opus-4-1")).toBeCloseTo(90);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-3-5-haiku-20241022")).toBeCloseTo(4.8);
+  });
+  it("uses the Sonnet 5 promotional rate only through August 2026", () => {
+    const promo = Date.parse("2026-08-31T23:59:59.999Z");
+    const standard = Date.parse("2026-09-01T00:00:00.000Z");
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-sonnet-5", 0, 0, promo)).toBeCloseTo(12);
+    expect(estimateCostUsd(1_000_000, 1_000_000, 0, "claude-sonnet-5", 0, 0, standard)).toBeCloseTo(18);
   });
   it("prices cached input far cheaper than fresh input", () => {
     const allFresh = estimateCostUsd(1_000_000, 0, 0, "gpt-5.5");
@@ -86,6 +129,9 @@ describe("estimateCostUsd", () => {
   it("prices Claude cache writes separately from cache reads", () => {
     expect(estimateCostUsd(1_000_000, 0, 0, "claude-sonnet-4-6", 1_000_000)).toBeCloseTo(3.75);
     expect(estimateCostUsd(1_000_000, 0, 1_000_000, "claude-sonnet-4-6", 0)).toBeCloseTo(0.3);
+  });
+  it("prices Claude one-hour cache writes at 2x base input", () => {
+    expect(estimateCostUsd(1_000_000, 0, 0, "claude-sonnet-4-6", 1_000_000, 1_000_000)).toBeCloseTo(6);
   });
   it("clamps cached input to the available input total", () => {
     expect(estimateCostUsd(10, 0, 100, "gpt-5.5")).toBeCloseTo(0.000005);
@@ -125,5 +171,14 @@ describe("aggregateDashboard", () => {
       String(new Date(localStart).getDate()).padStart(2, "0"),
     ].join("-");
     expect(d.activity[d.activity.length - 1]).toEqual({ day: localDay, count: 1 });
+  });
+  it("prices time-limited model rates using each conversation date", () => {
+    const promo = Date.parse("2026-08-31T12:00:00.000Z");
+    const standard = Date.parse("2026-09-01T12:00:00.000Z");
+    const d = aggregateDashboard([
+      { name: "promo", lastModified: promo, startMs: promo, tokensIn: 1_000_000, tokensOut: 1_000_000, model: "claude-sonnet-5", sizeBytes: 1 },
+      { name: "standard", lastModified: standard, startMs: standard, tokensIn: 1_000_000, tokensOut: 1_000_000, model: "claude-sonnet-5", sizeBytes: 1 },
+    ], standard);
+    expect(d.estCostUsd).toBeCloseTo(30);
   });
 });

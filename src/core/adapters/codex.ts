@@ -60,6 +60,10 @@ function execToLooseSpans(events: CodexEvent[]): LooseSpan[] {
   }
 
   const rootId = threadId ?? "codex-session";
+  const llmCalls = order.reduce(
+    (count, id) => count + (items.get(id)?.type === "agent_message" ? 1 : 0),
+    0,
+  );
   const out: LooseSpan[] = [
     {
       span_id: rootId,
@@ -70,6 +74,7 @@ function execToLooseSpans(events: CodexEvent[]): LooseSpan[] {
       end_time: order.length,
       attributes: {
         "openinference.span.kind": "AGENT",
+        "tracelens.llm.calls": llmCalls,
         "gen_ai.usage.input_tokens": usage?.input_tokens,
         "gen_ai.usage.output_tokens": usage?.output_tokens,
       },
@@ -167,10 +172,14 @@ function callOutputText(output: unknown): string | undefined {
 function reasoningSummaryText(summary: unknown): string | undefined {
   if (!Array.isArray(summary)) return undefined;
   const texts = summary
-    .map((b) => (b && typeof b === "object" ? (b as { text?: unknown }).text : undefined))
+    .map((b) => {
+      if (!b || typeof b !== "object") return undefined;
+      const block = b as { type?: unknown; text?: unknown };
+      return block.type === "summary_text" ? block.text : undefined;
+    })
     .filter((x): x is string => typeof x === "string");
-  const joined = texts.join("\n\n").trim();
-  return joined || undefined;
+  const joined = texts.join("\n\n");
+  return joined.trim() ? joined : undefined;
 }
 
 function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
@@ -182,9 +191,9 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
   let lastTs = 0;
 
   const outputs = new Map<string, { output?: string; ts: number }>();
-  const calls: Array<{ callId: string; name?: string; args?: string; ts: number }> = [];
-  const messages: Array<{ text?: string; ts: number }> = [];
-  const reasonings: Array<{ text: string; ts: number }> = [];
+  const calls: Array<{ callId: string; name?: string; args?: string; ts: number; order: number }> = [];
+  const messages: Array<{ text?: string; ts: number; order: number }> = [];
+  const reasonings: Array<{ text: string; ts: number; order: number }> = [];
 
   events.forEach((ev, i) => {
     const ts = tsToMs(ev.timestamp, i);
@@ -201,20 +210,20 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
       if (typeof total.output_tokens === "number") usageOut = total.output_tokens;
     } else if (ev.type === "response_item") {
       if (p.type === "function_call") {
-        calls.push({ callId: String(p.call_id ?? `call-${i}`), name: p.name as string, args: p.arguments as string, ts });
+        calls.push({ callId: String(p.call_id ?? `call-${i}`), name: p.name as string, args: p.arguments as string, ts, order: i });
       } else if (p.type === "function_call_output") {
         outputs.set(String(p.call_id), { output: callOutputText(p.output), ts });
       } else if (p.type === "message" && p.role === "assistant") {
-        messages.push({ text: outputText(p.content), ts });
+        messages.push({ text: outputText(p.content), ts, order: i });
       } else if (p.type === "reasoning") {
         const text = reasoningSummaryText(p.summary);
-        if (text !== undefined) reasonings.push({ text, ts });
+        if (text !== undefined) reasonings.push({ text, ts, order: i });
       }
     }
   });
 
   const rootId = sessionId ?? "codex-session";
-  const spans: Array<{ ts: number; span: LooseSpan }> = [];
+  const spans: Array<{ ts: number; order: number; span: LooseSpan }> = [];
 
   for (const c of calls) {
     const out = outputs.get(c.callId);
@@ -229,6 +238,7 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
     const isError = !!m && m[1] !== "0";
     spans.push({
       ts: c.ts,
+      order: c.order,
       span: {
         span_id: c.callId,
         parent_span_id: rootId,
@@ -248,6 +258,7 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
   messages.forEach((msg, k) => {
     spans.push({
       ts: msg.ts,
+      order: msg.order,
       span: {
         span_id: `codex-msg-${k}`,
         parent_span_id: rootId,
@@ -265,6 +276,7 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
   reasonings.forEach((r, k) => {
     spans.push({
       ts: r.ts,
+      order: r.order,
       span: {
         span_id: `codex-think-${k}`,
         parent_span_id: rootId,
@@ -279,7 +291,7 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
       },
     });
   });
-  spans.sort((a, b) => a.ts - b.ts);
+  spans.sort((a, b) => a.ts - b.ts || a.order - b.order);
 
   const root: LooseSpan = {
     span_id: rootId,
@@ -290,6 +302,7 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
     end_time: lastTs,
     attributes: {
       "openinference.span.kind": "AGENT",
+      "tracelens.llm.calls": messages.length,
       ...(model !== undefined ? { "gen_ai.request.model": model } : {}),
       "gen_ai.usage.input_tokens": usageIn,
       "gen_ai.usage.output_tokens": usageOut,

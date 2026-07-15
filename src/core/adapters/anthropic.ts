@@ -159,13 +159,25 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
 
   const rootId = sessionId ?? "claude-code-session";
   const spans: Array<{ ts: number; span: LooseSpan }> = [];
+  let assistantCalls = 0;
+  let rootUsageIn = 0;
+  let rootUsageOut = 0;
 
   lines.forEach((ln, i) => {
     if (ln.message?.role !== "assistant") return;
+    assistantCalls += 1;
     const ts = ccTsToMs(ln.timestamp, i);
     const usage = ln.message?.usage;
+    let usageAssigned = false;
     for (const b of blocksOf(ln.message?.content)) {
       if (b.type === "text" && typeof b.text === "string") {
+        const usageAttrs = !usageAssigned
+          ? {
+              "gen_ai.usage.input_tokens": usage?.input_tokens,
+              "gen_ai.usage.output_tokens": usage?.output_tokens,
+            }
+          : {};
+        usageAssigned = true;
         spans.push({
           ts,
           span: {
@@ -178,8 +190,7 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
             attributes: {
               "openinference.span.kind": "LLM",
               "gen_ai.request.model": ln.message?.model,
-              "gen_ai.usage.input_tokens": usage?.input_tokens,
-              "gen_ai.usage.output_tokens": usage?.output_tokens,
+              ...usageAttrs,
               "output.value": b.text,
             },
           },
@@ -239,6 +250,10 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
         });
       }
     }
+    if (!usageAssigned) {
+      rootUsageIn += usage?.input_tokens ?? 0;
+      rootUsageOut += usage?.output_tokens ?? 0;
+    }
   });
   spans.sort((a, b) => a.ts - b.ts);
 
@@ -251,8 +266,11 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
     end_time: lastTs,
     attributes: {
       "openinference.span.kind": "AGENT",
+      "tracelens.llm.calls": assistantCalls,
       ...(model !== undefined ? { "gen_ai.request.model": model } : {}),
       ...(firstPrompt !== undefined ? { "input.value": firstPrompt } : {}),
+      ...(rootUsageIn > 0 ? { "gen_ai.usage.input_tokens": rootUsageIn } : {}),
+      ...(rootUsageOut > 0 ? { "gen_ai.usage.output_tokens": rootUsageOut } : {}),
     },
   };
   return [root, ...spans.map((s) => s.span)];

@@ -6,6 +6,7 @@ export interface ConvStat {
   tokensIn?: number;     // total prompt tokens (INCLUDING cached)
   cachedIn?: number;     // the cached subset of tokensIn (billed ~10x cheaper)
   cacheWriteIn?: number;  // Claude cache creation tokens, billed separately
+  cacheWrite1hIn?: number; // one-hour subset of Claude cache creation tokens
   tokensOut?: number;
   model?: string;
   sizeBytes: number;
@@ -48,6 +49,7 @@ interface TokenTotals {
   tokensOut: number;
   cachedIn: number;
   cacheWriteIn?: number;
+  cacheWrite1hIn?: number;
 }
 
 function num(v: unknown): number {
@@ -67,7 +69,13 @@ function usageOf(record: unknown): Record<string, unknown> | undefined {
 
 export function extractTokens(tail: string): TokenTotals | null {
   let codexFound: TokenTotals | null = null;
-  const claudeSum: Required<TokenTotals> = { tokensIn: 0, tokensOut: 0, cachedIn: 0, cacheWriteIn: 0 };
+  const claudeSum: Required<TokenTotals> = {
+    tokensIn: 0,
+    tokensOut: 0,
+    cachedIn: 0,
+    cacheWriteIn: 0,
+    cacheWrite1hIn: 0,
+  };
   let hasClaudeUsage = false;
 
   for (const r of parseLines(tail)) {
@@ -87,7 +95,15 @@ export function extractTokens(tail: string): TokenTotals | null {
     const input = num(usage.input_tokens);
     const output = num(usage.output_tokens);
     const cacheRead = num(usage.cache_read_input_tokens);
-    const cacheWrite = num(usage.cache_creation_input_tokens);
+    const cacheCreation = usage.cache_creation && typeof usage.cache_creation === "object"
+      ? usage.cache_creation as Record<string, unknown>
+      : undefined;
+    const cacheWrite5m = num(cacheCreation?.ephemeral_5m_input_tokens);
+    const cacheWrite1h = num(cacheCreation?.ephemeral_1h_input_tokens);
+    const cacheWrite = Math.max(
+      num(usage.cache_creation_input_tokens),
+      cacheWrite5m + cacheWrite1h,
+    );
     if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) {
       continue;
     }
@@ -96,9 +112,18 @@ export function extractTokens(tail: string): TokenTotals | null {
     claudeSum.tokensOut += output;
     claudeSum.cachedIn += cacheRead;
     claudeSum.cacheWriteIn += cacheWrite;
+    claudeSum.cacheWrite1hIn += Math.min(cacheWrite1h, cacheWrite);
   }
   if (codexFound) return codexFound;
-  return hasClaudeUsage ? claudeSum : null;
+  if (!hasClaudeUsage) return null;
+  const result: TokenTotals = {
+    tokensIn: claudeSum.tokensIn,
+    tokensOut: claudeSum.tokensOut,
+    cachedIn: claudeSum.cachedIn,
+    cacheWriteIn: claudeSum.cacheWriteIn,
+  };
+  if (claudeSum.cacheWrite1hIn > 0) result.cacheWrite1hIn = claudeSum.cacheWrite1hIn;
+  return result;
 }
 
 /** First parseable top-level `timestamp` in the head, as epoch ms. */
@@ -133,20 +158,45 @@ export function modelOf(head: string): string | undefined {
 // Sources:
 // https://developers.openai.com/api/docs/pricing
 // https://platform.claude.com/docs/en/about-claude/pricing
-const PRICES: Array<{ match: RegExp; inUsd: number; cachedUsd: number; outUsd: number; cacheWriteUsd?: number }> = [
+interface PriceRate {
+  inUsd: number;
+  cachedUsd: number;
+  outUsd: number;
+  cacheWrite5mUsd?: number;
+  cacheWrite1hUsd?: number;
+}
+
+const PRICES: Array<PriceRate & { match: RegExp }> = [
+  { match: /gpt-5\.6(?:-sol)?(?:-\d{4}(?:-\d{2}){0,2})?$/i, inUsd: 5, cachedUsd: 0.5, outUsd: 30 },
+  { match: /gpt-5\.6-terra/i, inUsd: 2.5, cachedUsd: 0.25, outUsd: 15 },
+  { match: /gpt-5\.6-luna/i, inUsd: 1, cachedUsd: 0.1, outUsd: 6 },
   { match: /gpt-5\.5-pro/i, inUsd: 30, cachedUsd: 30, outUsd: 180 },
   { match: /gpt-5\.5/i, inUsd: 5, cachedUsd: 0.5, outUsd: 30 },
+  { match: /gpt-5\.4-pro/i, inUsd: 30, cachedUsd: 30, outUsd: 180 },
   { match: /gpt-5\.4-mini/i, inUsd: 0.75, cachedUsd: 0.075, outUsd: 4.5 },
   { match: /gpt-5\.4-nano/i, inUsd: 0.2, cachedUsd: 0.02, outUsd: 1.25 },
   { match: /gpt-5\.4/i, inUsd: 2.5, cachedUsd: 0.25, outUsd: 15 },
   { match: /gpt-5\.3-codex/i, inUsd: 1.75, cachedUsd: 0.175, outUsd: 14 },
   { match: /chat-latest/i, inUsd: 5, cachedUsd: 0.5, outUsd: 30 },
   { match: /gpt-4|o4|o3/i, inUsd: 2.5, cachedUsd: 0.25, outUsd: 10 },
-  { match: /claude.*haiku/i, inUsd: 1, cachedUsd: 0.1, outUsd: 5, cacheWriteUsd: 1.25 },
-  { match: /claude.*sonnet/i, inUsd: 3, cachedUsd: 0.3, outUsd: 15, cacheWriteUsd: 3.75 },
-  { match: /claude.*opus/i, inUsd: 5, cachedUsd: 0.5, outUsd: 25, cacheWriteUsd: 6.25 },
+  { match: /claude.*(?:fable|mythos).*5/i, inUsd: 10, cachedUsd: 1, outUsd: 50, cacheWrite5mUsd: 12.5, cacheWrite1hUsd: 20 },
+  { match: /claude.*(?:haiku.*3[-_.]?5|3[-_.]?5.*haiku)/i, inUsd: 0.8, cachedUsd: 0.08, outUsd: 4, cacheWrite5mUsd: 1, cacheWrite1hUsd: 1.6 },
+  { match: /claude.*haiku/i, inUsd: 1, cachedUsd: 0.1, outUsd: 5, cacheWrite5mUsd: 1.25, cacheWrite1hUsd: 2 },
+  { match: /claude.*sonnet/i, inUsd: 3, cachedUsd: 0.3, outUsd: 15, cacheWrite5mUsd: 3.75, cacheWrite1hUsd: 6 },
+  { match: /claude.*opus.*4[-_.]?[5-9]/i, inUsd: 5, cachedUsd: 0.5, outUsd: 25, cacheWrite5mUsd: 6.25, cacheWrite1hUsd: 10 },
+  { match: /claude.*opus/i, inUsd: 15, cachedUsd: 1.5, outUsd: 75, cacheWrite5mUsd: 18.75, cacheWrite1hUsd: 30 },
 ];
 const FALLBACK = { inUsd: 2, cachedUsd: 0.2, outUsd: 10 };
+const SONNET_5_STANDARD_START_MS = Date.parse("2026-09-01T00:00:00.000Z");
+
+function rateForModel(model: string | undefined, atMs: number): PriceRate {
+  if (model && /claude.*sonnet.*5/i.test(model)) {
+    return atMs < SONNET_5_STANDARD_START_MS
+      ? { inUsd: 2, cachedUsd: 0.2, outUsd: 10, cacheWrite5mUsd: 2.5, cacheWrite1hUsd: 4 }
+      : { inUsd: 3, cachedUsd: 0.3, outUsd: 15, cacheWrite5mUsd: 3.75, cacheWrite1hUsd: 6 };
+  }
+  return (model && PRICES.find((p) => p.match.test(model))) || FALLBACK;
+}
 
 /** Estimate cost, pricing the cached input subset ~10x cheaper than fresh input. */
 export function estimateCostUsd(
@@ -155,19 +205,23 @@ export function estimateCostUsd(
   cachedIn: number,
   model?: string,
   cacheWriteIn = 0,
+  cacheWrite1hIn = 0,
+  atMs = Date.now(),
 ): number {
-  const rate = (model && PRICES.find((p) => p.match.test(model))) || FALLBACK;
+  const rate = rateForModel(model, atMs);
   const totalIn = Math.max(0, tokensIn);
   const cacheRead = Math.min(Math.max(0, cachedIn), totalIn);
   const cacheWrite = Math.min(Math.max(0, cacheWriteIn), Math.max(0, totalIn - cacheRead));
+  const cacheWrite1h = Math.min(Math.max(0, cacheWrite1hIn), cacheWrite);
+  const cacheWrite5m = cacheWrite - cacheWrite1h;
   const freshIn = Math.max(0, totalIn - cacheRead - cacheWrite);
-  const cacheWriteUsd = "cacheWriteUsd" in rate && typeof rate.cacheWriteUsd === "number"
-    ? rate.cacheWriteUsd
-    : rate.inUsd;
+  const cacheWrite5mUsd = rate.cacheWrite5mUsd ?? rate.inUsd;
+  const cacheWrite1hUsd = rate.cacheWrite1hUsd ?? rate.inUsd;
   return (
     (freshIn / 1e6) * rate.inUsd +
     (cacheRead / 1e6) * rate.cachedUsd +
-    (cacheWrite / 1e6) * cacheWriteUsd +
+    (cacheWrite5m / 1e6) * cacheWrite5mUsd +
+    (cacheWrite1h / 1e6) * cacheWrite1hUsd +
     (Math.max(0, tokensOut) / 1e6) * rate.outUsd
   );
 }
@@ -193,11 +247,12 @@ export function aggregateDashboard(stats: ConvStat[], now: number): DashboardMod
     const tIn = s.tokensIn ?? 0;
     const cIn = s.cachedIn ?? 0;
     const cWrite = s.cacheWriteIn ?? 0;
+    const cWrite1h = s.cacheWrite1hIn ?? 0;
     const tOut = s.tokensOut ?? 0;
     totalTokensIn += tIn;
     totalCachedIn += cIn;
     totalTokensOut += tOut;
-    estCostUsd += estimateCostUsd(tIn, tOut, cIn, s.model, cWrite);
+    estCostUsd += estimateCostUsd(tIn, tOut, cIn, s.model, cWrite, cWrite1h, s.startMs ?? s.lastModified);
 
     const project = s.project ?? "(unknown)";
     const row = byProject.get(project) ?? { project, count: 0, tokens: 0, lastActive: 0 };

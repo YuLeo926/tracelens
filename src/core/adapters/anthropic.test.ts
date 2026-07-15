@@ -112,4 +112,52 @@ describe("anthropicAdapter — Claude Code thinking blocks", () => {
     const t = parseTrace(CC);
     expect(flatten(t.roots).some((n) => n.name === "thinking")).toBe(false);
   });
+
+  it("counts assistant responses rather than thinking/text spans", () => {
+    const t = parseTrace(CCT);
+    expect(t.summary.llmCalls).toBe(2);
+    const think = flatten(t.roots).find((n) => n.name === "thinking")!;
+    expect(think.tokensIn).toBeUndefined();
+    expect(think.tokensOut).toBeUndefined();
+  });
+});
+
+const CC_USAGE_BLOCKS = [
+  { type: "user", timestamp: "2026-07-15T10:00:00.000Z", sessionId: "cc-usage", message: { role: "user", content: "Inspect it." } },
+  {
+    type: "assistant",
+    timestamp: "2026-07-15T10:00:01.000Z",
+    message: {
+      role: "assistant",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 10, output_tokens: 8 },
+      content: [{ type: "text", text: "First." }, { type: "text", text: "Second." }],
+    },
+  },
+  {
+    type: "assistant",
+    timestamp: "2026-07-15T10:00:02.000Z",
+    message: {
+      role: "assistant",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 40, output_tokens: 5 },
+      content: [{ type: "tool_use", id: "toolu_usage", name: "Read", input: { file_path: "a.ts" } }],
+    },
+  },
+  { type: "user", timestamp: "2026-07-15T10:00:03.000Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_usage", content: "ok" }] } },
+];
+
+describe("anthropicAdapter — Claude Code response usage", () => {
+  it("charges usage once per assistant response, including tool-only responses", () => {
+    const t = parseTrace(CC_USAGE_BLOCKS);
+    expect(t.summary.totalTokensIn).toBe(50);
+    expect(t.summary.totalTokensOut).toBe(13);
+    expect(t.summary.llmCalls).toBe(2);
+
+    const textSpans = flatten(t.roots).filter((n) => n.name === "assistant");
+    expect(textSpans.map((n) => [n.tokensIn, n.tokensOut])).toEqual([
+      [10, 8],
+      [undefined, undefined],
+    ]);
+  });
 });

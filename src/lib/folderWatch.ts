@@ -63,16 +63,13 @@ export interface TraceFileRef {
   handle: FileSystemFileHandle;
 }
 
-/** Trace files in the folder, NEWEST first, capped at `limit`, with handles. */
-export async function scanTraceFiles(
-  dir: FileSystemDirectoryHandle,
-  limit = 300,
-): Promise<TraceFileRef[]> {
+/** Trace files in the folder, NEWEST first, with handles. */
+export async function scanTraceFiles(dir: FileSystemDirectoryHandle): Promise<TraceFileRef[]> {
   const handles = new Map<string, FileSystemFileHandle>();
   const meta: Array<{ name: string; lastModified: number; sizeBytes: number }> = [];
   await collect(dir, "", 0, handles, meta);
   meta.sort((a, b) => b.lastModified - a.lastModified || (a.name > b.name ? -1 : 1));
-  return meta.slice(0, limit).map((m) => ({
+  return meta.map((m) => ({
     name: m.name,
     lastModified: m.lastModified,
     sizeBytes: m.sizeBytes,

@@ -137,4 +137,56 @@ describe("codexAdapter — rollout reasoning items", () => {
     const names = nodes.map((n) => n.name);
     expect(names.indexOf("reasoning")).toBeLessThan(names.indexOf("shell_command"));
   });
+
+  it("does not count reasoning spans as extra LLM calls", () => {
+    expect(parseTrace(ROLLOUT_THINK).summary.llmCalls).toBe(1);
+  });
+
+  it("does not count exec reasoning items as extra LLM calls", () => {
+    const trace = parseTrace([
+      { type: "thread.started", thread_id: "thread-reasoning" },
+      { type: "item.completed", item: { id: "reasoning-1", type: "reasoning", text: "Thinking" } },
+      { type: "item.completed", item: { id: "message-1", type: "agent_message", text: "Done." } },
+      { type: "turn.completed", usage: { input_tokens: 10, output_tokens: 2 } },
+    ]);
+
+    expect(trace.summary.llmCalls).toBe(1);
+  });
+});
+
+const ROLLOUT_REASONING_FIDELITY = [
+  { timestamp: "2026-07-15T11:00:00.000Z", type: "session_meta", payload: { id: "sess-fidelity" } },
+  {
+    timestamp: "2026-07-15T11:00:01.000Z",
+    type: "response_item",
+    payload: {
+      type: "reasoning",
+      summary: [
+        { type: "summary_text", text: "  indented thought  " },
+        { type: "output_text", text: "must not be exposed" },
+      ],
+    },
+  },
+];
+
+const ROLLOUT_EQUAL_TIMESTAMPS = [
+  { timestamp: "2026-07-15T12:00:00.000Z", type: "session_meta", payload: { id: "sess-order" } },
+  { timestamp: "2026-07-15T12:00:01.000Z", type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "Plan" }] } },
+  { timestamp: "2026-07-15T12:00:01.000Z", type: "response_item", payload: { type: "function_call", name: "shell_command", arguments: "{}", call_id: "call-order" } },
+  { timestamp: "2026-07-15T12:00:01.000Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Done" }] } },
+];
+
+describe("codexAdapter — reasoning fidelity and ordering", () => {
+  it("preserves summary_text whitespace and ignores other block types", () => {
+    const reasoning = flatten(parseTrace(ROLLOUT_REASONING_FIDELITY).roots)
+      .find((n) => n.name === "reasoning")!;
+    expect(reasoning.output).toBe("  indented thought  ");
+  });
+
+  it("keeps source order when rollout timestamps are equal", () => {
+    const names = flatten(parseTrace(ROLLOUT_EQUAL_TIMESTAMPS).roots)
+      .slice(1)
+      .map((n) => n.name);
+    expect(names).toEqual(["reasoning", "shell_command", "assistant"]);
+  });
 });

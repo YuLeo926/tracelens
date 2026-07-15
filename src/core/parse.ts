@@ -104,7 +104,9 @@ export function parseTraceText(text: string): ParsedTrace {
 
 function summarize(spans: RawSpan[]): TraceSummary {
   let toolCalls = 0;
-  let llmCalls = 0;
+  let inferredLlmCalls = 0;
+  let explicitLlmCalls = 0;
+  let hasExplicitLlmCalls = false;
   let errors = 0;
   let totalTokensIn = 0;
   let totalTokensOut = 0;
@@ -114,7 +116,12 @@ function summarize(spans: RawSpan[]): TraceSummary {
 
   for (const span of spans) {
     if (span.kind === "tool") toolCalls++;
-    if (span.kind === "llm") llmCalls++;
+    if (span.kind === "llm") inferredLlmCalls++;
+    const explicitCalls = span.attributes["tracelens.llm.calls"];
+    if (typeof explicitCalls === "number" && Number.isFinite(explicitCalls) && explicitCalls >= 0) {
+      explicitLlmCalls += explicitCalls;
+      hasExplicitLlmCalls = true;
+    }
     if (span.status === "error") errors++;
     totalTokensIn += span.tokensIn ?? 0;
     totalTokensOut += span.tokensOut ?? 0;
@@ -128,7 +135,7 @@ function summarize(spans: RawSpan[]): TraceSummary {
   return {
     spanCount: spans.length,
     toolCalls,
-    llmCalls,
+    llmCalls: hasExplicitLlmCalls ? explicitLlmCalls : inferredLlmCalls,
     errors,
     totalTokensIn,
     totalTokensOut,
