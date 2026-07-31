@@ -1,5 +1,6 @@
+import type { RefObject } from "react";
 import { formatCost, formatDuration, formatTokens } from "../../core/format";
-import { redactText } from "../../core/session/sanitize";
+import { sessionDisplayText } from "../../core/session/display";
 import type { SessionLifecycle, SessionSummary } from "../../core/session/types";
 
 export interface FactRow {
@@ -20,14 +21,6 @@ function plural(count: number, singular: string): string {
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
-function safeFactText(value: string): string {
-  return redactText(value)
-    .replace(/root cause/gi, "cause")
-    .replace(/loop/gi, "repetition")
-    .replace(/raw input/gi, "content")
-    .replace(/raw output/gi, "content");
-}
-
 /** Maps server-provided, redacted facts to compact objective rows. */
 export function sessionFactRows(session: SessionSummary): FactRow[] {
   const { facts } = session;
@@ -44,12 +37,12 @@ export function sessionFactRows(session: SessionSummary): FactRow[] {
   }
 
   rows.push(
-    ...facts.errorEvents.map((event) => ({ id: `error-${event.eventId}`, label: `Error event: ${safeFactText(event.name)}`, value: formatDuration(event.durationMs), eventId: event.eventId })),
-    ...facts.slowestEvents.map((event) => ({ id: `slowest-${event.eventId}`, label: `Slowest event: ${safeFactText(event.name)}`, value: formatDuration(event.durationMs), eventId: event.eventId })),
-    ...facts.highestTokenEvents.map((event) => ({ id: `tokens-${event.eventId}`, label: `Highest-token event: ${safeFactText(event.name)}`, value: `${formatTokens(event.tokensIn)} in / ${formatTokens(event.tokensOut)} out`, eventId: event.eventId })),
+    ...facts.errorEvents.map((event) => ({ id: `error-${event.eventId}`, label: `Error event: ${sessionDisplayText(event.name)}`, value: formatDuration(event.durationMs), eventId: event.eventId })),
+    ...facts.slowestEvents.map((event) => ({ id: `slowest-${event.eventId}`, label: `Slowest event: ${sessionDisplayText(event.name)}`, value: formatDuration(event.durationMs), eventId: event.eventId })),
+    ...facts.highestTokenEvents.map((event) => ({ id: `tokens-${event.eventId}`, label: `Highest-token event: ${sessionDisplayText(event.name)}`, value: `${formatTokens(event.tokensIn)} in / ${formatTokens(event.tokensOut)} out`, eventId: event.eventId })),
     ...facts.repeatedOperations.map((operation) => ({
       id: `repeated-${operation.eventIds[0] ?? operation.operationName}`,
-      label: `Repeated operation: ${safeFactText(operation.operationName)}`,
+      label: `Repeated operation: ${sessionDisplayText(operation.operationName)}`,
       value: `${plural(operation.count, "call")}${operation.failureCount ? `, ${plural(operation.failureCount, "error")}` : ""}`,
       ...(operation.eventIds[0] === undefined ? {} : { eventId: operation.eventIds[0] }),
     })),
@@ -86,10 +79,10 @@ interface Props {
   session: SessionSummary;
   onOpenEvent: (eventId: string) => void;
   onOpenPicker: () => void;
-  error?: string | null;
+  sessionsButtonRef?: RefObject<HTMLButtonElement>;
 }
 
-export function SessionOverview({ session, onOpenEvent, onOpenPicker, error }: Props) {
+export function SessionOverview({ session, onOpenEvent, onOpenPicker, sessionsButtonRef }: Props) {
   const rows = sessionFactRows(session);
   const totals = ["lifecycle", "duration", "errors", "tokens"].map((id) => rows.find((row) => row.id === id)!);
   const runRows = rows.filter((row) => !row.id.startsWith("error-") && !row.id.startsWith("slowest-") && !row.id.startsWith("tokens-") && !totals.includes(row));
@@ -98,13 +91,11 @@ export function SessionOverview({ session, onOpenEvent, onOpenPicker, error }: P
     <div className="col-span-2 flex min-h-0 flex-1 flex-col overflow-auto bg-panel">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
-          <h1 className="break-words text-sm font-semibold text-text">{safeFactText(session.title || "Untitled session")}</h1>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted"><span className="capitalize">{session.provider}</span><span>{safeFactText(session.project || "No project")}</span><span>{LIFECYCLE_LABEL[session.lifecycle]}</span></div>
+          <h1 className="break-words text-sm font-semibold text-text">{sessionDisplayText(session.title, "Untitled session")}</h1>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted"><span className="capitalize">{session.provider}</span><span>{sessionDisplayText(session.project, "No project")}</span><span>{LIFECYCLE_LABEL[session.lifecycle]}</span></div>
         </div>
-        <button type="button" onClick={onOpenPicker} className="shrink-0 rounded border border-border px-2.5 py-1.5 text-[12px] text-muted hover:text-text">Sessions</button>
+        <button ref={sessionsButtonRef} type="button" onClick={onOpenPicker} className="shrink-0 rounded border border-border px-2.5 py-1.5 text-[12px] text-muted hover:text-text">Sessions</button>
       </header>
-      {error && <div role="alert" className="border-b border-border bg-panel-2 px-4 py-2 text-[12px] text-error">{error}</div>}
-
       <div className="grid grid-cols-2 border-b border-border sm:grid-cols-4">
         {totals.map((row) => <div key={row.id} className="border-r border-border-soft px-4 py-2 last:border-r-0"><div className="text-[9px] uppercase tracking-wider text-faint">{row.label}</div><div className="mono mt-0.5 text-[12px] text-text">{row.value}</div></div>)}
       </div>

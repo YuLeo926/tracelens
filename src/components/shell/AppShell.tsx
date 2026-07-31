@@ -16,16 +16,18 @@ interface Props {
   search: SearchControls;
   exportActions: ExportActions;
   showOverview?: boolean;
+  banner?: ReactNode;
   children: ReactNode; // the view | detail split
 }
 
-export function AppShell({ activeView, onSelectView, label, summary, onReset, search, exportActions, showOverview = false, children }: Props) {
+export function AppShell({ activeView, onSelectView, label, summary, onReset, search, exportActions, showOverview = false, banner, children }: Props) {
   return (
     <div className="flex h-full bg-bg">
       <Rail activeView={activeView} onSelectView={onSelectView} showOverview={showOverview} />
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar label={label} onReset={onReset} search={search} exportActions={exportActions} />
         <SummaryStrip summary={summary} />
+        {banner}
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
           {children}
         </div>

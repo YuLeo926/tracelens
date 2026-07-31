@@ -30,12 +30,22 @@ import { createViewerClient, readViewerToken } from "./core/viewerTransport";
 import type { SessionSummary } from "./core/session/types";
 import { SessionOverview } from "./components/session/SessionOverview";
 import { SessionPicker } from "./components/session/SessionPicker";
-
-function sessionLinkParams(): { sessionId: string | null; eventId: string | null } | null {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("mode") !== "session") return null;
-  return { sessionId: params.get("session"), eventId: params.get("event") };
-}
+import {
+  clearSessionNavigation,
+  completeSessionRequest,
+  createSessionNavigation,
+  failSessionRequest,
+  isCurrentSessionRequest,
+  localSessionRoute,
+  sessionEventSelection,
+  sessionAnnotationKey,
+  sessionLocationForEvent,
+  sessionLocationForReset,
+  sessionLocationForSelection,
+  setLoadedSessionRoute,
+  shouldPreferLocalSession,
+  startSessionRequest,
+} from "./core/session/navigation";
 
 export default function App() {
   const [trace, setTrace] = useState<ParsedTrace | null>(null);
@@ -51,21 +61,40 @@ export default function App() {
   const [following, setFollowing] = useState(true);
   const [displayedFile, setDisplayedFile] = useState("");
   const [pendingRun, setPendingRun] = useState<LiveUpdate | null>(null);
-  const [localSessionEnabled, setLocalSessionEnabled] = useState(() => sessionLinkParams() !== null);
-  const [requestedSessionId, setRequestedSessionId] = useState(() => sessionLinkParams()?.sessionId ?? null);
+  const [sessionNavigation, setSessionNavigation] = useState(() => createSessionNavigation(localSessionRoute(window.location.search)));
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
-  const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const sessionRequestRef = useRef(0);
+  const sessionOpenerRef = useRef<HTMLButtonElement>(null);
+  const sessionNavigationRef = useRef(sessionNavigation);
+  const traceRef = useRef(trace);
+  const sessionSummaryRef = useRef(sessionSummary);
+  sessionNavigationRef.current = sessionNavigation;
+  traceRef.current = trace;
+  sessionSummaryRef.current = sessionSummary;
+
+  const localSessionEnabled = shouldPreferLocalSession(sessionNavigation.route);
+  const sessionLoading = sessionNavigation.loading;
+  const sessionError = sessionNavigation.error;
+
+  const replaceSessionNavigation = useCallback((next: typeof sessionNavigation) => {
+    sessionNavigationRef.current = next;
+    setSessionNavigation(next);
+  }, []);
+
+  const closeSessionPicker = useCallback(() => {
+    setSessionPickerOpen(false);
+    window.requestAnimationFrame(() => sessionOpenerRef.current?.focus());
+  }, []);
 
   const convo = useConversations(folderDir);
   const dashboard = useMemo(() => aggregateDashboard(convo.conversations, Date.now()), [convo.conversations]);
   const failedScan = useFailedScan(folderDir, convo.conversations);
   const live = folderDir !== null && folderView === "trace";
 
-  const ann = useAnnotations(label);
+  const annotationKey = sessionAnnotationKey(localSessionEnabled ? sessionSummary?.id ?? null : null, label);
+  const ann = useAnnotations(annotationKey);
   const knownTags = useMemo(
     () =>
       [...new Set(Object.values(ann.annotations).map((a) => a.tag).filter((t): t is string => !!t))],
@@ -73,9 +102,7 @@ export default function App() {
   );
 
   const onLoad = (t: ParsedTrace, lbl: string, source: string) => {
-    sessionRequestRef.current += 1;
-    setLocalSessionEnabled(false);
-    setRequestedSessionId(null);
+    replaceSessionNavigation(clearSessionNavigation(sessionNavigationRef.current));
     setSessionSummary(null);
     setSessionList([]);
     setSessionPickerOpen(false);
@@ -153,7 +180,7 @@ export default function App() {
   }, [liveWatch]);
 
   const reset = () => {
-    sessionRequestRef.current += 1;
+    replaceSessionNavigation(clearSessionNavigation(sessionNavigationRef.current));
     liveWatch.stop();
     setFolderDir(null);
     setFolderView("list");
@@ -168,13 +195,10 @@ export default function App() {
     setFollowing(true);
     setPendingRun(null);
     setDisplayedFile("");
-    setLocalSessionEnabled(false);
-    setRequestedSessionId(null);
     setSessionSummary(null);
     setSessionList([]);
-    setSessionLoading(false);
     setSessionPickerOpen(false);
-    window.history.replaceState(null, "", window.location.pathname);
+    window.history.replaceState(null, "", sessionLocationForReset(window.location.pathname, window.location.search, window.location.hash));
   };
 
   const search = useMemo(
@@ -262,29 +286,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!localSessionEnabled) return;
+    const route = sessionNavigation.route;
+    if (!route || !sessionNavigation.loading) return;
 
-    const link = sessionLinkParams();
     const token = readViewerToken(window.location.hash);
-    const sessionId = requestedSessionId ?? link?.sessionId;
-    const request = ++sessionRequestRef.current;
+    const sessionId = route.sessionId;
+    const request = sessionNavigation.requestId;
     let cancelled = false;
 
     if (!token || !sessionId) {
-      setSessionLoading(false);
-      setError("This local session link is incomplete.");
+      const failed = failSessionRequest(sessionNavigationRef.current, request, "This local session link is incomplete.");
+      replaceSessionNavigation(failed);
       return () => { cancelled = true; };
     }
 
-    setSessionLoading(true);
-    setError(null);
     const client = createViewerClient(token);
     void Promise.all([client.loadSession(sessionId), client.listSessions()])
       .then(([payload, sessions]) => {
-        if (cancelled || request !== sessionRequestRef.current) return;
+        if (cancelled || !isCurrentSessionRequest(sessionNavigationRef.current, request, route)) return;
         const parsed = parseTraceText(payload.source);
-        const eventId = link?.eventId;
-        const selectedEventId = eventId && parsed.byId.has(eventId) ? eventId : parsed.roots[0]?.spanId ?? null;
+        const selection = sessionEventSelection(route.eventId, parsed.byId, parsed.roots[0]?.spanId ?? null);
         const availableSessions = sessions.some((item) => item.id === payload.session.id)
           ? sessions
           : [payload.session, ...sessions];
@@ -294,21 +315,52 @@ export default function App() {
         setRawSource(payload.source);
         setSessionSummary(payload.session);
         setSessionList(availableSessions);
-        setSelectedId(selectedEventId);
-        setActiveView(eventId && selectedEventId === eventId ? "tree" : "overview");
+        setSelectedId(selection.selectedId);
+        setActiveView(selection.view);
         setQuery("");
         setMatchIndex(0);
-        setError(null);
-        setSessionLoading(false);
+        replaceSessionNavigation(completeSessionRequest(sessionNavigationRef.current, request, payload.session.id));
+        closeSessionPicker();
       })
       .catch((loadError: unknown) => {
-        if (cancelled || request !== sessionRequestRef.current) return;
-        setError(loadError instanceof Error ? loadError.message : "TraceLens could not load this session.");
-        setSessionLoading(false);
+        if (cancelled || !isCurrentSessionRequest(sessionNavigationRef.current, request, route)) return;
+        replaceSessionNavigation(failSessionRequest(
+          sessionNavigationRef.current,
+          request,
+          loadError instanceof Error ? loadError.message : "TraceLens could not load this session.",
+        ));
       });
 
     return () => { cancelled = true; };
-  }, [localSessionEnabled, requestedSessionId]);
+  }, [closeSessionPicker, replaceSessionNavigation, sessionNavigation]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const route = localSessionRoute(window.location.search);
+      if (!route) {
+        replaceSessionNavigation(clearSessionNavigation(sessionNavigationRef.current));
+        setSessionSummary(null);
+        setSessionList([]);
+        setTrace(null);
+        setSelectedId(null);
+        setActiveView(DEFAULT_VIEW);
+        return;
+      }
+
+      const currentTrace = traceRef.current;
+      if (sessionSummaryRef.current?.id === route.sessionId && currentTrace) {
+        const selection = sessionEventSelection(route.eventId, currentTrace.byId, currentTrace.roots[0]?.spanId ?? null);
+        replaceSessionNavigation(setLoadedSessionRoute(sessionNavigationRef.current, route));
+        setSelectedId(selection.selectedId);
+        setActiveView(selection.view);
+        return;
+      }
+
+      replaceSessionNavigation(startSessionRequest(sessionNavigationRef.current, route));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [replaceSessionNavigation]);
 
   // On first load, open a trace embedded in the URL hash (#t=...).
   useEffect(() => {
@@ -367,17 +419,31 @@ export default function App() {
   );
 
   const selectSession = useCallback((sessionId: string) => {
-    setSessionPickerOpen(false);
-    if (sessionId === requestedSessionId) return;
-    sessionRequestRef.current += 1;
-    setRequestedSessionId(sessionId);
-  }, [requestedSessionId]);
+    const route = { sessionId, eventId: null };
+    const previous = sessionNavigationRef.current.route;
+    if (previous?.sessionId !== sessionId || previous.eventId !== null) {
+      window.history.pushState(null, "", sessionLocationForSelection(window.location.pathname, window.location.search, window.location.hash, sessionId));
+    }
+    replaceSessionNavigation(startSessionRequest(sessionNavigationRef.current, route));
+  }, [replaceSessionNavigation]);
+
+  const retrySession = useCallback(() => {
+    const route = sessionNavigationRef.current.route;
+    if (!route?.sessionId) return;
+    replaceSessionNavigation(startSessionRequest(sessionNavigationRef.current, route));
+  }, [replaceSessionNavigation]);
 
   const openOverviewEvent = useCallback((eventId: string) => {
     if (!trace?.byId.has(eventId)) return;
+    const route = sessionNavigationRef.current.route;
+    if (route?.sessionId) {
+      const nextRoute = { ...route, eventId };
+      window.history.pushState(null, "", sessionLocationForEvent(window.location.pathname, window.location.search, window.location.hash, eventId));
+      replaceSessionNavigation(setLoadedSessionRoute(sessionNavigationRef.current, nextRoute));
+    }
     setSelectedId(eventId);
     setActiveView("tree");
-  }, [trace]);
+  }, [replaceSessionNavigation, trace]);
 
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
   const filtering = query.trim().length > 0;
@@ -403,8 +469,8 @@ export default function App() {
           <div className="flex h-full items-center justify-center bg-bg p-6">
             <div className="w-full max-w-sm border border-border bg-panel p-4">
               <div className="text-sm font-semibold text-text">{sessionLoading ? "Loading local session" : "Local session unavailable"}</div>
-              {error && <div role="alert" className="mt-2 text-sm text-error">{error}</div>}
-              {!sessionLoading && <button type="button" onClick={reset} className="mt-4 rounded border border-border px-3 py-1.5 text-[12px] text-muted hover:text-text">Open another trace</button>}
+              {sessionError && <div role="alert" className="mt-2 text-sm text-error">{sessionError}</div>}
+              {!sessionLoading && <div className="mt-4 flex gap-2">{sessionNavigation.route?.sessionId && <button type="button" onClick={retrySession} className="rounded border border-border px-3 py-1.5 text-[12px] text-muted hover:text-text">Retry</button>}<button type="button" onClick={reset} className="rounded border border-border px-3 py-1.5 text-[12px] text-muted hover:text-text">Open another trace</button></div>}
             </div>
           </div>
         ) : live ? (
@@ -422,6 +488,7 @@ export default function App() {
           activeView={activeView}
           onSelectView={setActiveView}
           showOverview={sessionSummary !== null}
+          banner={sessionError ? <div role="alert" className="border-b border-border bg-panel-2 px-4 py-2 text-[12px] text-error">{sessionError}</div> : undefined}
           label={label}
           summary={trace.summary}
           onReset={reset}
@@ -446,7 +513,7 @@ export default function App() {
               session={sessionSummary}
               onOpenEvent={openOverviewEvent}
               onOpenPicker={() => setSessionPickerOpen(true)}
-              error={localSessionEnabled ? error : null}
+              sessionsButtonRef={sessionOpenerRef}
             />
           )}
           {activeView !== "overview" && (
@@ -479,7 +546,7 @@ export default function App() {
             )}
             {activeView === "diff" && <DiffView trace={trace} label={label} />}
             {activeView === "annotations" && (
-              <AnnotationsView annotations={ann.annotations} label={label} onSelect={onAnnotationSelect} />
+              <AnnotationsView annotations={ann.annotations} label={annotationKey} onSelect={onAnnotationSelect} />
             )}
             {live && !following && (
               <BackToLivePill newRun={pendingRun !== null} onClick={goLive} />
@@ -506,8 +573,9 @@ export default function App() {
             sessions={sessionList}
             activeId={sessionSummary.id}
             loading={sessionLoading}
+            error={sessionError}
             onSelect={selectSession}
-            onClose={() => setSessionPickerOpen(false)}
+            onClose={closeSessionPicker}
           />
         )}
         </>

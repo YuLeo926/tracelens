@@ -1,16 +1,22 @@
-import { useEffect } from "react";
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { formatRelativeTime, formatTokens } from "../../core/format";
-import { redactText } from "../../core/session/sanitize";
+import { sessionDisplayText } from "../../core/session/display";
 import type { ProjectMatch, SessionSummary } from "../../core/session/types";
 
 const MATCH_RANK: Record<ProjectMatch, number> = { exact: 0, related: 1, fallback: 2 };
 
 export function sessionTitle(session: SessionSummary): string {
-  return redactText(session.title ?? "").trim() || "Untitled session";
+  return sessionDisplayText(session.title, "Untitled session");
 }
 
 export function sessionProject(session: SessionSummary): string {
-  return redactText(session.project ?? "").trim() || "No project";
+  return sessionDisplayText(session.project, "No project");
+}
+
+export function nextDialogFocusIndex(currentIndex: number, count: number, shiftKey: boolean): number {
+  if (count <= 0) return -1;
+  if (currentIndex < 0) return shiftKey ? count - 1 : 0;
+  return (currentIndex + (shiftKey ? -1 : 1) + count) % count;
 }
 
 export function rankedSessions(sessions: SessionSummary[]): SessionSummary[] {
@@ -21,11 +27,13 @@ interface Props {
   sessions: SessionSummary[];
   activeId: string;
   loading: boolean;
+  error: string | null;
   onSelect: (sessionId: string) => void;
   onClose: () => void;
 }
 
-export function SessionPicker({ sessions, activeId, loading, onSelect, onClose }: Props) {
+export function SessionPicker({ sessions, activeId, loading, error, onSelect, onClose }: Props) {
+  const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -34,10 +42,20 @@ export function SessionPicker({ sessions, activeId, loading, onSelect, onClose }
 
   const rows = rankedSessions(sessions);
   const now = Date.now();
+  const trapFocus = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])") ?? [])]
+      .filter((element) => !element.hasAttribute("hidden"));
+    const next = nextDialogFocusIndex(focusable.indexOf(document.activeElement as HTMLElement), focusable.length, event.shiftKey);
+    if (next < 0) return;
+    event.preventDefault();
+    focusable[next].focus();
+  };
   return (
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-text/20 p-2" role="presentation" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-labelledby="session-picker-title" className="flex max-h-[min(40rem,calc(100vh-1rem))] w-[min(44rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-lg" onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="session-picker-title" aria-busy={loading} className="flex max-h-[min(40rem,calc(100vh-1rem))] w-[min(44rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-lg" onMouseDown={(event) => event.stopPropagation()} onKeyDown={trapFocus}>
         <header className="flex items-center justify-between border-b border-border px-4 py-3"><h2 id="session-picker-title" className="text-sm font-semibold text-text">Sessions</h2><button type="button" autoFocus onClick={onClose} aria-label="Close session picker" title="Close" className="h-7 w-7 rounded text-[16px] text-muted hover:bg-panel-2 hover:text-text">x</button></header>
+        {(loading || error) && <div className="border-b border-border bg-panel-2 px-4 py-2 text-[12px] text-muted">{loading ? "Loading session..." : <span role="alert" className="text-error">{error}</span>}</div>}
         <div className="min-h-0 overflow-auto">
           {rows.map((session) => {
             const active = session.id === activeId;
