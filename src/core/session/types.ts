@@ -44,6 +44,20 @@ export interface RunFacts {
   repeatedOperations: RepeatedOperationFact[];
 }
 
+export interface SessionSummary {
+  id: string;
+  provider: SessionProvider;
+  title?: string;
+  project?: string;
+  modifiedAt: number;
+  sizeBytes: number;
+  startMs?: number;
+  lifecycle: SessionLifecycle;
+  match: ProjectMatch;
+  selectionReason: string;
+  facts: RunFacts;
+}
+
 export interface QueryPage<T> {
   items: T[];
   nextCursor?: string;
