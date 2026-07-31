@@ -26,6 +26,16 @@ import type { LiveUpdate } from "./lib/liveEngine";
 import { useAnnotations } from "./hooks/useAnnotations";
 import { AnnotationsView } from "./components/views/AnnotationsView";
 import type { Annotation } from "./core/annotations";
+import { createViewerClient, readViewerToken } from "./core/viewerTransport";
+import type { SessionSummary } from "./core/session/types";
+import { SessionOverview } from "./components/session/SessionOverview";
+import { SessionPicker } from "./components/session/SessionPicker";
+
+function sessionLinkParams(): { sessionId: string | null; eventId: string | null } | null {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("mode") !== "session") return null;
+  return { sessionId: params.get("session"), eventId: params.get("event") };
+}
 
 export default function App() {
   const [trace, setTrace] = useState<ParsedTrace | null>(null);
@@ -41,7 +51,14 @@ export default function App() {
   const [following, setFollowing] = useState(true);
   const [displayedFile, setDisplayedFile] = useState("");
   const [pendingRun, setPendingRun] = useState<LiveUpdate | null>(null);
+  const [localSessionEnabled, setLocalSessionEnabled] = useState(() => sessionLinkParams() !== null);
+  const [requestedSessionId, setRequestedSessionId] = useState(() => sessionLinkParams()?.sessionId ?? null);
+  const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
+  const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const sessionRequestRef = useRef(0);
 
   const convo = useConversations(folderDir);
   const dashboard = useMemo(() => aggregateDashboard(convo.conversations, Date.now()), [convo.conversations]);
@@ -56,6 +73,12 @@ export default function App() {
   );
 
   const onLoad = (t: ParsedTrace, lbl: string, source: string) => {
+    sessionRequestRef.current += 1;
+    setLocalSessionEnabled(false);
+    setRequestedSessionId(null);
+    setSessionSummary(null);
+    setSessionList([]);
+    setSessionPickerOpen(false);
     setTrace(t);
     setLabel(lbl);
     setRawSource(source);
@@ -130,6 +153,7 @@ export default function App() {
   }, [liveWatch]);
 
   const reset = () => {
+    sessionRequestRef.current += 1;
     liveWatch.stop();
     setFolderDir(null);
     setFolderView("list");
@@ -144,9 +168,13 @@ export default function App() {
     setFollowing(true);
     setPendingRun(null);
     setDisplayedFile("");
-    if (window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
+    setLocalSessionEnabled(false);
+    setRequestedSessionId(null);
+    setSessionSummary(null);
+    setSessionList([]);
+    setSessionLoading(false);
+    setSessionPickerOpen(false);
+    window.history.replaceState(null, "", window.location.pathname);
   };
 
   const search = useMemo(
@@ -233,8 +261,58 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    if (!localSessionEnabled) return;
+
+    const link = sessionLinkParams();
+    const token = readViewerToken(window.location.hash);
+    const sessionId = requestedSessionId ?? link?.sessionId;
+    const request = ++sessionRequestRef.current;
+    let cancelled = false;
+
+    if (!token || !sessionId) {
+      setSessionLoading(false);
+      setError("This local session link is incomplete.");
+      return () => { cancelled = true; };
+    }
+
+    setSessionLoading(true);
+    setError(null);
+    const client = createViewerClient(token);
+    void Promise.all([client.loadSession(sessionId), client.listSessions()])
+      .then(([payload, sessions]) => {
+        if (cancelled || request !== sessionRequestRef.current) return;
+        const parsed = parseTraceText(payload.source);
+        const eventId = link?.eventId;
+        const selectedEventId = eventId && parsed.byId.has(eventId) ? eventId : parsed.roots[0]?.spanId ?? null;
+        const availableSessions = sessions.some((item) => item.id === payload.session.id)
+          ? sessions
+          : [payload.session, ...sessions];
+
+        setTrace(parsed);
+        setLabel(payload.session.title || "Local session");
+        setRawSource(payload.source);
+        setSessionSummary(payload.session);
+        setSessionList(availableSessions);
+        setSelectedId(selectedEventId);
+        setActiveView(eventId && selectedEventId === eventId ? "tree" : "overview");
+        setQuery("");
+        setMatchIndex(0);
+        setError(null);
+        setSessionLoading(false);
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled || request !== sessionRequestRef.current) return;
+        setError(loadError instanceof Error ? loadError.message : "TraceLens could not load this session.");
+        setSessionLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [localSessionEnabled, requestedSessionId]);
+
   // On first load, open a trace embedded in the URL hash (#t=...).
   useEffect(() => {
+    if (localSessionEnabled) return;
     const token = readShareHash(window.location.hash);
     if (!token) return;
     let cancelled = false;
@@ -250,7 +328,7 @@ export default function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [localSessionEnabled]);
 
   const goLive = useCallback(() => {
     setFollowing(true);
@@ -288,6 +366,19 @@ export default function App() {
     [live],
   );
 
+  const selectSession = useCallback((sessionId: string) => {
+    setSessionPickerOpen(false);
+    if (sessionId === requestedSessionId) return;
+    sessionRequestRef.current += 1;
+    setRequestedSessionId(sessionId);
+  }, [requestedSessionId]);
+
+  const openOverviewEvent = useCallback((eventId: string) => {
+    if (!trace?.byId.has(eventId)) return;
+    setSelectedId(eventId);
+    setActiveView("tree");
+  }, [trace]);
+
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
   const filtering = query.trim().length > 0;
   const currentMatchId =
@@ -308,7 +399,15 @@ export default function App() {
           onClose={reset}
         />
       ) : !trace ? (
-        live ? (
+        localSessionEnabled ? (
+          <div className="flex h-full items-center justify-center bg-bg p-6">
+            <div className="w-full max-w-sm border border-border bg-panel p-4">
+              <div className="text-sm font-semibold text-text">{sessionLoading ? "Loading local session" : "Local session unavailable"}</div>
+              {error && <div role="alert" className="mt-2 text-sm text-error">{error}</div>}
+              {!sessionLoading && <button type="button" onClick={reset} className="mt-4 rounded border border-border px-3 py-1.5 text-[12px] text-muted hover:text-text">Open another trace</button>}
+            </div>
+          </div>
+        ) : live ? (
           <LiveStandby
             state={liveWatch.state}
             folderName={liveWatch.folderName}
@@ -318,9 +417,11 @@ export default function App() {
           <Loader onLoad={onLoad} onError={setError} error={error} onStartLive={openFolder} />
         )
       ) : (
+        <>
         <AppShell
           activeView={activeView}
           onSelectView={setActiveView}
+          showOverview={sessionSummary !== null}
           label={label}
           summary={trace.summary}
           onReset={reset}
@@ -340,6 +441,15 @@ export default function App() {
             active: activeView === "tree",
           }}
         >
+          {activeView === "overview" && sessionSummary && (
+            <SessionOverview
+              session={sessionSummary}
+              onOpenEvent={openOverviewEvent}
+              onOpenPicker={() => setSessionPickerOpen(true)}
+              error={localSessionEnabled ? error : null}
+            />
+          )}
+          {activeView !== "overview" && (
           <section className="relative flex min-h-0 flex-col overflow-hidden border-r border-border bg-panel">
             {live && (
               <LiveBar
@@ -375,6 +485,8 @@ export default function App() {
               <BackToLivePill newRun={pendingRun !== null} onClick={goLive} />
             )}
           </section>
+          )}
+          {activeView !== "overview" && (
           <aside className="min-h-0 overflow-auto bg-bg">
             {selected ? (
               <SpanDetail
@@ -387,7 +499,18 @@ export default function App() {
               <div className="p-6 text-sm text-muted">Select a span to inspect it.</div>
             )}
           </aside>
+          )}
         </AppShell>
+        {sessionPickerOpen && sessionSummary && (
+          <SessionPicker
+            sessions={sessionList}
+            activeId={sessionSummary.id}
+            loading={sessionLoading}
+            onSelect={selectSession}
+            onClose={() => setSessionPickerOpen(false)}
+          />
+        )}
+        </>
       )}
     </ThemeProvider>
   );

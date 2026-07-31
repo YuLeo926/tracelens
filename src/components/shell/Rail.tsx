@@ -4,9 +4,10 @@ import { ThemeToggle } from "./ThemeToggle";
 interface Props {
   activeView: ViewId;
   onSelectView: (id: ViewId) => void;
+  showOverview?: boolean;
 }
 
-export function Rail({ activeView, onSelectView }: Props) {
+export function Rail({ activeView, onSelectView, showOverview = false }: Props) {
   return (
     <nav className="flex w-[50px] flex-col items-center gap-1 border-r border-border bg-rail py-3">
       <div
@@ -19,7 +20,7 @@ export function Rail({ activeView, onSelectView }: Props) {
         </svg>
       </div>
 
-      {VIEWS.map((v) => {
+      {VIEWS.filter((v) => v.id !== "overview" || showOverview).map((v) => {
         const active = v.id === activeView;
         return (
           <button
@@ -28,7 +29,7 @@ export function Rail({ activeView, onSelectView }: Props) {
             title={v.status === "soon" ? `${v.label} — coming in v1` : v.label}
             aria-label={v.label}
             aria-current={active ? "page" : undefined}
-            className={`relative flex h-9 w-9 items-center justify-center rounded-lg text-[15px] ${
+            className={`relative flex h-9 w-9 items-center justify-center rounded-lg text-[15px] ${v.id === "overview" ? "font-serif font-bold" : ""} ${
               active
                 ? "bg-panel text-accent-strong shadow-sm"
                 : "text-muted hover:bg-panel hover:text-text"

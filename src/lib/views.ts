@@ -2,7 +2,7 @@
 // renders the matching view. New v1 views (flamegraph, diff) become real by
 // swapping their stub component and flipping status to "ready".
 
-export type ViewId = "tree" | "flamegraph" | "diff" | "annotations";
+export type ViewId = "overview" | "tree" | "flamegraph" | "diff" | "annotations";
 export type ViewStatus = "ready" | "soon";
 
 export interface ViewDef {
@@ -13,6 +13,7 @@ export interface ViewDef {
 }
 
 export const VIEWS: ViewDef[] = [
+  { id: "overview", label: "Session overview", icon: "i", status: "ready" },
   { id: "tree", label: "Call tree", icon: "▤", status: "ready" },
   { id: "flamegraph", label: "Flamegraph", icon: "▦", status: "ready" },
   { id: "diff", label: "Diff", icon: "⇄", status: "ready" },

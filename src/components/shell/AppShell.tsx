@@ -15,13 +15,14 @@ interface Props {
   onReset: () => void;
   search: SearchControls;
   exportActions: ExportActions;
+  showOverview?: boolean;
   children: ReactNode; // the view | detail split
 }
 
-export function AppShell({ activeView, onSelectView, label, summary, onReset, search, exportActions, children }: Props) {
+export function AppShell({ activeView, onSelectView, label, summary, onReset, search, exportActions, showOverview = false, children }: Props) {
   return (
     <div className="flex h-full bg-bg">
-      <Rail activeView={activeView} onSelectView={onSelectView} />
+      <Rail activeView={activeView} onSelectView={onSelectView} showOverview={showOverview} />
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar label={label} onReset={onReset} search={search} exportActions={exportActions} />
         <SummaryStrip summary={summary} />
