@@ -146,7 +146,7 @@ export async function createSessionRepository(
   }
 
   async function loadCandidate(candidate: SessionCandidate): Promise<LoadedSession> {
-    let currentStat: Awaited<ReturnType<typeof fs.stat>>;
+    let currentStat: { mtimeMs: number; size: number };
     try {
       currentStat = await fileSystem.stat(candidate.path);
     } catch {

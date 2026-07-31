@@ -96,7 +96,7 @@ async function candidateForFile(filePath: string, cwd: string): Promise<SessionC
 
 async function scanDirectory(root: string, depth: number, files: string[]): Promise<void> {
   if (depth > MAX_RECURSIVE_DEPTH) return;
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: import("node:fs").Dirent<string>[];
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch {

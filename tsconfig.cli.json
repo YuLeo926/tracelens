@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "cli/**/*.ts",
+    "mcp/**/*.ts",
+    "src/core/adapters/**/*.ts",
+    "src/core/parse.ts",
+    "src/core/openinference.ts",
+    "src/core/types.ts",
+    "src/core/session/**/*.ts"
+  ],
+  "exclude": ["**/*.test.ts"]
+}

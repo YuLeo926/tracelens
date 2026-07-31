@@ -104,7 +104,7 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
     }, idleMs);
   }
 
-  async function serveStatic(request: IncomingMessage, response: ServerResponse, root: string, pathname: string): Promise<void> {
+  async function serveStatic(_request: IncomingMessage, response: ServerResponse, root: string, pathname: string): Promise<void> {
     if (pathname !== "/tracelens" && !pathname.startsWith(VIEWER_BASE)) {
       sendNotFound(response);
       return;

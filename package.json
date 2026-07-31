@@ -1,15 +1,18 @@
 {
   "name": "tracelens",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
+  "private": false,
   "type": "module",
   "description": "Local-first, zero-backend viewer for AI agent traces. Drop in an OpenInference / OTel GenAI trace and see every step, tool call, token and cost — like DevTools for an agent run.",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run build:web && npm run build:cli",
+    "build:web": "npm run typecheck && vite build",
+    "build:cli": "tsup",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "typecheck:cli": "tsc --project tsconfig.cli.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -17,13 +20,27 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "tracelens": "dist-cli/index.js"
+  },
+  "files": [
+    "dist",
+    "dist-cli",
+    "README.md",
+    "LICENSE"
+  ],
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^20.19.43",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^26.1.0",
     "tailwindcss": "^4.0.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.6.3",
     "vite": "^6.0.5",
     "vitest": "^4.1.9"
