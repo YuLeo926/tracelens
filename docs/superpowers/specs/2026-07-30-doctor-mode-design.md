@@ -2,7 +2,12 @@
 
 **Date:** 2026-07-30
 
-**Status:** Approved
+**Status:** Superseded by `2026-07-31-hybrid-codex-analysis-design.md`
+
+This document is retained for history. The approved hybrid design keeps the
+objective trace facts and local viewer, but moves contextual diagnosis to Codex
+through bounded MCP tools instead of implementing the rule-heavy Doctor report
+described below.
 
 **Scope:** Reposition TraceLens from a trace viewer into a local diagnostic tool for individual Codex and Claude Code users.
 

@@ -1,5 +1,7 @@
 # TraceLens Doctor Mode Implementation Plan
 
+> **Status:** Superseded by `../specs/2026-07-31-hybrid-codex-analysis-design.md`. Do not implement this plan. A replacement implementation plan will follow the approved written review.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `npx tracelens doctor`, which discovers the latest local Codex or Claude Code run and opens a deterministic, diagnosis-first local report whose findings link into the existing trace debugger.
