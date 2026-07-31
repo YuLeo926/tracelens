@@ -19,14 +19,16 @@ export function redactText(text: string): string {
 export function clipText(text: string, maxChars: number): ClippedText {
   const redacted = redactText(text);
   const originalLength = redacted.length;
-  if (originalLength <= maxChars) {
+  const limit = Math.max(0, Math.floor(maxChars));
+  if (originalLength <= limit) {
     return { text: redacted, truncated: false, originalLength };
   }
 
   const marker = "...";
-  const prefixLength = Math.max(0, maxChars - marker.length);
+  const markerLength = Math.min(marker.length, limit);
+  const prefixLength = limit - markerLength;
   return {
-    text: `${redacted.slice(0, prefixLength)}${marker}`,
+    text: `${redacted.slice(0, prefixLength)}${marker.slice(0, markerLength)}`,
     truncated: true,
     originalLength,
   };
@@ -37,9 +39,10 @@ export function safeAttributes(
 ): Record<string, string | number | boolean | null> {
   const safe: Record<string, string | number | boolean | null> = {};
   for (const [key, value] of Object.entries(attributes)) {
-    if (typeof value === "string") safe[key] = redactText(value);
+    const safeKey = redactText(key);
+    if (typeof value === "string") safe[safeKey] = redactText(value);
     else if (typeof value === "number" || typeof value === "boolean" || value === null) {
-      safe[key] = value;
+      safe[safeKey] = value;
     }
   }
   return safe;

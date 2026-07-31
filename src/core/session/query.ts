@@ -61,25 +61,88 @@ function primitiveSearchText(node: RunNode): string[] {
   );
 }
 
+interface DetailBudget {
+  remaining: number;
+}
+
+function takeDetailText(budget: DetailBudget, text: string, maxChars = budget.remaining) {
+  const clipped = clipText(text, Math.min(budget.remaining, maxChars));
+  budget.remaining -= clipped.text.length;
+  return clipped;
+}
+
+function boundedAttributes(
+  attributes: Record<string, unknown>,
+  budget: DetailBudget,
+): { attributes: EventDetail["attributes"]; truncated: boolean } {
+  const safe = safeAttributes(attributes);
+  const bounded: EventDetail["attributes"] = {};
+  let truncated = Object.keys(safe).length !== Object.keys(attributes).length;
+
+  for (const [key, value] of Object.entries(safe)) {
+    if (budget.remaining === 0) {
+      truncated = true;
+      break;
+    }
+
+    const clippedKey = takeDetailText(budget, key);
+    if (!clippedKey.text || Object.prototype.hasOwnProperty.call(bounded, clippedKey.text)) {
+      truncated = true;
+      continue;
+    }
+    if (clippedKey.truncated) truncated = true;
+
+    if (typeof value === "string") {
+      const clippedValue = takeDetailText(budget, value);
+      bounded[clippedKey.text] = clippedValue.text;
+      if (clippedValue.truncated) truncated = true;
+    } else {
+      bounded[clippedKey.text] = value;
+    }
+  }
+
+  return { attributes: bounded, truncated };
+}
+
 function detailFor(node: RunNode): EventDetail {
+  const budget: DetailBudget = { remaining: DETAIL_CONTENT_CHARS };
+  const eventId = takeDetailText(budget, node.spanId, PREVIEW_CHARS);
+  const name = takeDetailText(budget, node.name, PREVIEW_CHARS);
+  const kind = takeDetailText(budget, node.kind);
+  const status = takeDetailText(budget, node.status);
+  const statusMessage = node.statusMessage === undefined
+    ? undefined
+    : takeDetailText(budget, node.statusMessage, PREVIEW_CHARS);
   const input = node.input === undefined ? undefined : clipText(node.input, Number.MAX_SAFE_INTEGER).text;
   const output = node.output === undefined ? undefined : clipText(node.output, Number.MAX_SAFE_INTEGER).text;
-  const half = DETAIL_CONTENT_CHARS / 2;
-  const inputLimit = input === undefined ? 0 : Math.min(DETAIL_CONTENT_CHARS, Math.max(half, DETAIL_CONTENT_CHARS - (output?.length ?? 0)));
-  const outputLimit = output === undefined ? 0 : Math.min(DETAIL_CONTENT_CHARS, Math.max(half, DETAIL_CONTENT_CHARS - (input?.length ?? 0)));
-  const clippedInput = input === undefined ? undefined : clipText(input, inputLimit);
-  const clippedOutput = output === undefined ? undefined : clipText(output, outputLimit);
-  const safe = safeAttributes(node.attributes);
+  const half = Math.floor(budget.remaining / 2);
+  const inputLimit = input === undefined
+    ? 0
+    : Math.min(budget.remaining, Math.max(half, budget.remaining - (output?.length ?? 0)));
+  const outputLimit = output === undefined
+    ? 0
+    : Math.min(budget.remaining, Math.max(half, budget.remaining - (input?.length ?? 0)));
+  const clippedInput = input === undefined ? undefined : takeDetailText(budget, input, inputLimit);
+  const clippedOutput = output === undefined ? undefined : takeDetailText(budget, output, outputLimit);
+  const bounded = boundedAttributes(node.attributes, budget);
 
   return {
-    ...preview(node),
+    eventId: eventId.text,
+    name: name.text,
+    kind: kind.text as SpanKind,
+    status: status.text as SpanStatus,
+    startMs: node.startMs,
+    durationMs: node.durationMs,
+    ...(node.tokensIn === undefined ? {} : { tokensIn: node.tokensIn }),
+    ...(node.tokensOut === undefined ? {} : { tokensOut: node.tokensOut }),
+    ...(statusMessage === undefined ? {} : { statusMessage: statusMessage.text }),
     ...(clippedInput === undefined ? {} : { input: clippedInput.text }),
     ...(clippedOutput === undefined ? {} : { output: clippedOutput.text }),
-    attributes: safe,
+    attributes: bounded.attributes,
     truncated: {
       input: clippedInput?.truncated ?? false,
       output: clippedOutput?.truncated ?? false,
-      attributes: Object.keys(safe).length !== Object.keys(node.attributes).length,
+      attributes: bounded.truncated,
     },
   };
 }

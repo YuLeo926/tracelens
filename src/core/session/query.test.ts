@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { parseTrace } from "../parse";
 import { createSessionQuery } from "./query";
+import type { EventDetail } from "./types";
+
+function detailStringCharacters(detail: EventDetail): number {
+  const fields = [
+    detail.eventId,
+    detail.name,
+    detail.kind,
+    detail.status,
+    detail.inputSnippet,
+    detail.outputSnippet,
+    detail.statusMessage,
+    detail.input,
+    detail.output,
+  ];
+  return (
+    fields.reduce((total, value) => total + (value?.length ?? 0), 0) +
+    Object.entries(detail.attributes).reduce(
+      (total, [key, value]) => total + key.length + (typeof value === "string" ? value.length : 0),
+      0,
+    )
+  );
+}
 
 function toolSpan(index: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -37,11 +59,47 @@ describe("createSessionQuery", () => {
     expect(query.timeline({ cursor: first.nextCursor }).items).toHaveLength(25);
   });
 
-  it("caps total event detail content at twenty-four thousand characters", () => {
+  it("caps every string-bearing detail field at twenty-four thousand characters", () => {
     const query = createSessionQuery(traceWithOutput("x".repeat(30_000)));
     const detail = query.detail("tool-1")!;
-    expect((detail.input?.length ?? 0) + (detail.output?.length ?? 0)).toBeLessThanOrEqual(24_000);
+    expect(detailStringCharacters(detail)).toBeLessThanOrEqual(24_000);
+    expect(detail.inputSnippet).toBeUndefined();
+    expect(detail.outputSnippet).toBeUndefined();
     expect(detail.truncated.output).toBe(true);
+  });
+
+  it("bounds long attributes in the total detail budget and redacts attribute keys", () => {
+    const absolutePathKey = "C:\\Users\\alice\\transcript.txt";
+    const query = createSessionQuery(
+      parseTrace([
+        {
+          ...toolSpan(1, {
+            "input.value": "i".repeat(30_000),
+            "output.value": "o".repeat(30_000),
+            transcript: "t".repeat(30_000),
+            [absolutePathKey]: "a".repeat(30_000),
+          }),
+          name: "n".repeat(1_000),
+          status_message: "s".repeat(1_000),
+        },
+      ]),
+    );
+    const detail = query.detail("tool-1")!;
+
+    expect(detailStringCharacters(detail)).toBeLessThanOrEqual(24_000);
+    expect(detail.inputSnippet).toBeUndefined();
+    expect(detail.outputSnippet).toBeUndefined();
+    expect(detail.truncated.attributes).toBe(true);
+    expect(Object.keys(detail.attributes)).not.toContain(absolutePathKey);
+  });
+
+  it("redacts absolute paths in detail attribute keys", () => {
+    const absolutePathKey = "C:\\Users\\alice\\transcript.txt";
+    const query = createSessionQuery(
+      parseTrace([toolSpan(1, { [absolutePathKey]: "readable value" })]),
+    );
+
+    expect(query.detail("tool-1")!.attributes["<absolute-path>"]).toBe("readable value");
   });
 
   it("caps search results, filters timeline events, and searches literal text case-insensitively", () => {
