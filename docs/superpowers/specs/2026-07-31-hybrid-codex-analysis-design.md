@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-31
 
-**Status:** Approved direction; pending written-spec review
+**Status:** Approved
 
 **Supersedes:** `2026-07-30-doctor-mode-design.md`
 
