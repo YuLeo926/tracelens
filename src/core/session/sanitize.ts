@@ -7,10 +7,12 @@ export interface ClippedText {
 const WINDOWS_PATH = /(^|[\s"'`=:(\[{,])[A-Za-z]:(?:\\{1,2}|\/)[^\s"'`<>|]*/gm;
 const UNC_PATH = /\\{2,}[^\s"'`<>|]*/g;
 const POSIX_PATH = /(^|[\s"'`=:(\[{,])\/(?!\/)[^\s"'`<>|]*/gm;
+const FILE_URI = /\bfile:\/\/[^\s"'`<>|]*/gi;
 
-/** Remove machine-specific absolute paths while preserving relative paths and URLs. */
+/** Remove machine-specific absolute paths while preserving relative paths and HTTP(S) URLs. */
 export function redactText(text: string): string {
   return text
+    .replace(FILE_URI, "<absolute-path>")
     .replace(WINDOWS_PATH, "$1<absolute-path>")
     .replace(UNC_PATH, "<absolute-path>")
     .replace(POSIX_PATH, "$1<absolute-path>");

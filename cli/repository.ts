@@ -187,7 +187,9 @@ export async function createSessionRepository(
         query: createSessionQuery(trace),
         source,
       };
-      cache.set(candidate.path, { stamp: stamp(snapshot.modifiedAt, snapshot.sizeBytes), loaded });
+      if (!snapshot.unstable) {
+        cache.set(candidate.path, { stamp: stamp(snapshot.modifiedAt, snapshot.sizeBytes), loaded });
+      }
       return loaded;
     } catch (error) {
       cache.delete(candidate.path);

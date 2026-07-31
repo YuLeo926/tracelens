@@ -17,6 +17,19 @@ describe("clipText", () => {
     expect(result.text).toContain("./relative/file");
     expect(result.text).toContain("https://example.com/path");
   });
+
+  it("redacts local POSIX and Windows file URIs while preserving HTTP(S) URLs", () => {
+    const result = clipText(
+      "file:///tmp/private.jsonl file:///C:/Users/Ada/private.jsonl https://example.com/path http://example.com/path",
+      1_000,
+    );
+
+    expect(result.text).not.toContain("file:///tmp/private.jsonl");
+    expect(result.text).not.toContain("file:///C:/Users/Ada/private.jsonl");
+    expect(result.text.match(/<absolute-path>/g)).toHaveLength(2);
+    expect(result.text).toContain("https://example.com/path");
+    expect(result.text).toContain("http://example.com/path");
+  });
 });
 
 describe("safeAttributes", () => {

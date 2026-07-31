@@ -99,8 +99,6 @@ describe("createSessionRepository", () => {
     const cwd = path.join(home, "work", "tracelens");
     const file = path.join(home, ".codex", "sessions", "changing.jsonl");
     await writeCodexSession(file, cwd);
-    const repository = await createSessionRepository({ homeDir: home, cwd });
-    const [summary] = await repository.list();
     let reads = 0;
     const changingRepository = await createSessionRepository(
       { homeDir: home, cwd },
@@ -109,7 +107,16 @@ describe("createSessionRepository", () => {
         async readFile(filePath) {
           reads += 1;
           const result = await fs.readFile(filePath, "utf8");
-          await appendFile(file, " ");
+          if (reads <= 2) {
+            await appendFile(
+              file,
+              `${JSON.stringify({
+                type: "response_item",
+                timestamp: `2026-07-31T10:00:0${reads + 1}.000Z`,
+                payload: { type: "message", role: "assistant", content: `event-${reads}` },
+              })}\n`,
+            );
+          }
           return result;
         },
       },
@@ -117,9 +124,27 @@ describe("createSessionRepository", () => {
     const [changingSummary] = await changingRepository.list();
     const loaded = await changingRepository.load(changingSummary.id);
 
-    expect(reads).toBeGreaterThanOrEqual(2);
-    expect(loaded.summary.lifecycle).toBe("active");
-    expect(loaded.facts.lifecycle).toBe("active");
+    expect(changingSummary.lifecycle).toBe("active");
+    expect(reads).toBe(3);
+    expect(loaded.source).toContain("event-2");
+  });
+
+  it("redacts local file URIs from titles, source, and loaded session DTOs", async () => {
+    const home = await makeHome();
+    const cwd = path.join(home, "work", "tracelens");
+    const file = path.join(home, ".codex", "sessions", "file-uri.jsonl");
+    const posixUri = "file:///tmp/private.jsonl";
+    const windowsUri = "file:///C:/Users/Ada/private.jsonl";
+    await writeCodexSession(file, cwd, `Inspect ${posixUri} and ${windowsUri}`);
+    const repository = await createSessionRepository({ homeDir: home, cwd });
+    const [summary] = await repository.list();
+    const loaded = await repository.load(summary.id);
+
+    for (const value of [summary, loaded]) {
+      expectNoAbsolutePath(value, posixUri);
+      expectNoAbsolutePath(value, windowsUri);
+    }
+    expect(loaded.source).toContain("<absolute-path>");
   });
 
   it("validates an explicit file without falling back to discovery roots", async () => {
