@@ -41,6 +41,20 @@ function cwdOf(rec: unknown): string | undefined {
   return cwd || undefined;
 }
 
+function recordsOf(head: string): unknown[] {
+  const records: unknown[] = [];
+  for (const line of head.split(/\r?\n/)) {
+    const text = line.trim();
+    if (!text) continue;
+    try {
+      records.push(JSON.parse(text));
+    } catch {
+      // Ignore partial or malformed JSONL records.
+    }
+  }
+  return records;
+}
+
 function lastSegment(path: string): string | undefined {
   const segs = path.split(/[/\\]+/).filter(Boolean);
   return segs.length ? segs[segs.length - 1] : undefined;
@@ -89,4 +103,13 @@ export function extractConversationMeta(head: string): ConversationMeta {
     }
   }
   return meta;
+}
+
+/** Extract the original working-directory path without exposing it in browser rows. */
+export function extractConversationProjectPath(head: string): string | undefined {
+  for (const record of recordsOf(head)) {
+    const cwd = cwdOf(record);
+    if (cwd) return cwd;
+  }
+  return undefined;
 }

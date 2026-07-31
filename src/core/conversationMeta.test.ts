@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractConversationMeta } from "./conversationMeta";
+import { extractConversationMeta, extractConversationProjectPath } from "./conversationMeta";
 
 // One JSON object per line, like a real rollout head.
 const lines = (...objs: unknown[]) => objs.map((o) => JSON.stringify(o)).join("\n");
@@ -51,5 +51,11 @@ describe("extractConversationMeta", () => {
   it("omits project when there is no cwd", () => {
     const head = lines({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] } });
     expect(extractConversationMeta(head)).toEqual({ title: "hi" });
+  });
+
+  it("exports the Windows project path without changing the displayed project label", () => {
+    const head = lines({ type: "session_meta", payload: { cwd: "C:\\work\\trace-lens" } });
+    expect(extractConversationMeta(head)).toEqual({ project: "trace-lens" });
+    expect(extractConversationProjectPath(head)).toBe("C:\\work\\trace-lens");
   });
 });
