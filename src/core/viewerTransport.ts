@@ -1,7 +1,7 @@
 import type { SessionSummary } from "./session/types";
 import type { ViewerClient, ViewerSessionPayload } from "./viewerProtocol";
 
-const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
+const VIEWER_FRAGMENT = /^#token=([a-f0-9]{64})$/;
 const INVALID_LINK = "This TraceLens link is invalid or expired.";
 const MISSING_SESSION = "That session is no longer available.";
 const LOAD_FAILED = "TraceLens could not load this session.";
@@ -32,8 +32,7 @@ async function getJson(fetchImpl: typeof fetch, url: string, token: string): Pro
 }
 
 export function readViewerToken(hash: string): string | null {
-  const value = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash).get("token");
-  return value !== null && TOKEN_PATTERN.test(value) ? value : null;
+  return VIEWER_FRAGMENT.exec(hash)?.[1] ?? null;
 }
 
 export function createViewerClient(token: string, fetchImpl: typeof fetch = fetch): ViewerClient {

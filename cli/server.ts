@@ -67,9 +67,10 @@ function sendNotFound(response: ServerResponse): void {
 
 function tokenMatches(header: string | string[] | undefined, token: string): boolean {
   if (typeof header !== "string") return false;
-  const expected = `Bearer ${token}`;
-  if (header.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(header), Buffer.from(expected));
+  const received = Buffer.from(header, "latin1");
+  const expected = Buffer.from(`Bearer ${token}`, "latin1");
+  if (received.length !== expected.length) return false;
+  return timingSafeEqual(received, expected);
 }
 
 async function staticFile(root: string, filePath: string): Promise<StaticResult> {

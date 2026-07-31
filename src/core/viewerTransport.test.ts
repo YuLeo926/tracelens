@@ -18,6 +18,13 @@ describe("readViewerToken", () => {
     expect(readViewerToken("#token=not-a-token")).toBeNull();
     expect(readViewerToken("#other=value")).toBeNull();
   });
+
+  it("requires exactly one raw token parameter in a fragment", () => {
+    expect(readViewerToken(`token=${token}`)).toBeNull();
+    expect(readViewerToken(`#token=${token}&mode=session`)).toBeNull();
+    expect(readViewerToken(`#token=${token}&token=${token}`)).toBeNull();
+    expect(readViewerToken(`#%74oken=${token}`)).toBeNull();
+  });
 });
 
 describe("createViewerClient", () => {

@@ -77,6 +77,9 @@ describe("createViewerService", () => {
 
     await expect(get(serverOrigin(first), "/api/sessions")).resolves.toMatchObject({ status: 401 });
     await expect(get(serverOrigin(first), "/api/sessions", { authorization: "Bearer wrong" })).resolves.toMatchObject({ status: 401 });
+    await expect(
+      get(serverOrigin(first), "/api/sessions", { authorization: `Bearer ${token.slice(0, -1)}é` }),
+    ).resolves.toMatchObject({ status: 401 });
     const listed = await get(serverOrigin(first), "/api/sessions", authHeaders());
     expect(listed.status).toBe(200);
     expect(listed.headers["cache-control"]).toBe("no-store");
