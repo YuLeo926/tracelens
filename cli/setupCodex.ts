@@ -40,10 +40,10 @@ function unavailable(packageVersion: string): SetupCodexResult {
 }
 
 function isMissing(result: CommandResult): boolean {
-  const output = `${result.stdout}\n${result.stderr}`;
-  return result.exitCode === 1
-    && !/(command not found|is not recognized|enoent)/i.test(output)
-    && /\bnot found\b/i.test(output);
+  if (result.exitCode !== 1) return false;
+  const messages = [result.stdout, result.stderr].map((value) => value.trim()).filter(Boolean);
+  if (messages.length !== 1) return false;
+  return /^(?:error:\s*)?mcp (?:server|registration)(?: named)? ['"]?tracelens['"]? (?:was )?not found[.!]?$/i.test(messages[0]);
 }
 
 function hasExpectedTransport(output: string, packageVersion: string): boolean | undefined {
@@ -54,6 +54,7 @@ function hasExpectedTransport(output: string, packageVersion: string): boolean |
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+  if ((parsed as { name?: unknown }).name !== "tracelens") return undefined;
 
   const transport = (parsed as { transport?: unknown }).transport;
   if (typeof transport !== "object" || transport === null || Array.isArray(transport)) return undefined;
@@ -69,6 +70,7 @@ function hasExpectedTransport(output: string, packageVersion: string): boolean |
 }
 
 export async function setupCodex(options: SetupCodexOptions): Promise<SetupCodexResult> {
+  let removedExisting = false;
   let current: CommandResult;
   try {
     current = await options.run("codex", ["mcp", "get", "tracelens", "--json"]);
@@ -96,6 +98,7 @@ export async function setupCodex(options: SetupCodexOptions): Promise<SetupCodex
       if (removed.exitCode !== 0) {
         return { ok: false, changed: false, message: "Unable to update the TraceLens Codex connection." };
       }
+      removedExisting = true;
     } catch {
       return { ok: false, changed: false, message: "Unable to update the TraceLens Codex connection." };
     }
@@ -108,15 +111,19 @@ export async function setupCodex(options: SetupCodexOptions): Promise<SetupCodex
     if (added.exitCode !== 0) {
       return {
         ok: false,
-        changed: false,
-        message: `Unable to connect TraceLens to Codex. Register TraceLens manually: ${manualCommand(options.packageVersion)}`,
+        changed: removedExisting,
+        message: removedExisting
+          ? `TraceLens Codex connection replacement failed. Register TraceLens manually: ${manualCommand(options.packageVersion)}`
+          : `Unable to connect TraceLens to Codex. Register TraceLens manually: ${manualCommand(options.packageVersion)}`,
       };
     }
   } catch {
     return {
       ok: false,
-      changed: false,
-      message: `Unable to connect TraceLens to Codex. Register TraceLens manually: ${manualCommand(options.packageVersion)}`,
+      changed: removedExisting,
+      message: removedExisting
+        ? `TraceLens Codex connection replacement failed. Register TraceLens manually: ${manualCommand(options.packageVersion)}`
+        : `Unable to connect TraceLens to Codex. Register TraceLens manually: ${manualCommand(options.packageVersion)}`,
     };
   }
 

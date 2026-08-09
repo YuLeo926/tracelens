@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import packageMetadata from "../package.json";
 import { runCli, type CliDependencies } from "./index";
 import { setupCodex, type CommandRunner } from "./setupCodex";
 
-const VERSION = "0.2.0";
+const VERSION = packageMetadata.version;
 const expectedAddArgs = ["mcp", "add", "tracelens", "--", "npx", "-y", `tracelens@${VERSION}`, "mcp"];
 const missing = { exitCode: 1, stdout: "", stderr: "MCP server 'tracelens' not found" };
 const exact = {
@@ -24,6 +25,10 @@ const conflict = {
 
 function runner(...results: Array<{ exitCode: number; stdout: string; stderr: string }>): CommandRunner {
   return vi.fn(async () => results.shift() ?? { exitCode: 1, stdout: "", stderr: "unexpected command" });
+}
+
+function throwingRunner(error: Error): CommandRunner {
+  return vi.fn(async () => { throw error; });
 }
 
 function cliDependencies(runCommand: CommandRunner) {
@@ -90,6 +95,45 @@ describe("setupCodex", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    "config file not found: C:\\private\\codex\\config.toml",
+    "codex: command not found",
+    "Resource not found",
+    "MCP server 'tracelens' not found at C:\\private\\codex\\config.toml",
+    "error: unexpected argument '--json'",
+    "error: unrecognized subcommand 'mcp'",
+  ])("does not add when the failure is unrelated to a missing TraceLens registration: %s", async (stderr) => {
+    const run = runner({ exitCode: 1, stdout: "", stderr });
+
+    const result = await setupCodex({ force: false, packageVersion: VERSION, run });
+
+    expect(result).toMatchObject({ ok: false, changed: false });
+    expect(result.message).toContain(expectedAddArgs.slice(4).join(" "));
+    expect(result.message).not.toContain("C:\\private");
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("requires exit code 1 for a missing registration", async () => {
+    const run = runner({ exitCode: 2, stdout: "", stderr: "MCP server 'tracelens' not found" });
+
+    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toMatchObject({
+      ok: false,
+      changed: false,
+    });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("returns a safe unavailable result when the runner throws during inspection", async () => {
+    const run = throwingRunner(new Error("private failure at C:\\private\\config.toml"));
+
+    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toEqual({
+      ok: false,
+      changed: false,
+      message: `Codex could not be reached. Register TraceLens manually: codex ${expectedAddArgs.join(" ")}`,
+    });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
   it("returns a safe error for malformed registration output", async () => {
     const run = runner({ exitCode: 0, stdout: "not json", stderr: "" });
 
@@ -98,5 +142,121 @@ describe("setupCodex", () => {
       changed: false,
       message: "Unable to inspect the TraceLens Codex connection.",
     });
+  });
+
+  it.each([
+    {},
+    { name: "tracelens" },
+    { name: "tracelens", transport: {} },
+    { name: "tracelens", transport: { type: "stdio" } },
+    { name: "tracelens", transport: { type: "stdio", command: "npx" } },
+    { transport: { type: "stdio", command: "npx", args: ["-y", `tracelens@${VERSION}`, "mcp"] } },
+  ])("returns a safe error for registration JSON with missing fields", async (registration) => {
+    const run = runner({ exitCode: 0, stdout: JSON.stringify(registration), stderr: "" });
+
+    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toEqual({
+      ok: false,
+      changed: false,
+      message: "Unable to inspect the TraceLens Codex connection.",
+    });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("treats a valid non-stdio registration as a conflict", async () => {
+    const run = runner({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        name: "tracelens",
+        transport: { type: "streamable_http", url: "https://example.invalid/mcp" },
+      }),
+      stderr: "",
+    });
+
+    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toEqual({
+      ok: false,
+      changed: false,
+      message: "TraceLens already has a different Codex connection. Use \"tracelens setup codex --force\" to replace it.",
+    });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("does not add when forced removal fails", async () => {
+    const run = runner(conflict, { exitCode: 1, stdout: "", stderr: "private removal failure" });
+
+    await expect(setupCodex({ force: true, packageVersion: VERSION, run })).resolves.toEqual({
+      ok: false,
+      changed: false,
+      message: "Unable to update the TraceLens Codex connection.",
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(2, "codex", ["mcp", "remove", "tracelens"]);
+  });
+
+  it("reports a changed configuration when removal succeeds but replacement exits nonzero", async () => {
+    const run = runner(
+      conflict,
+      { exitCode: 0, stdout: "", stderr: "" },
+      { exitCode: 1, stdout: "", stderr: "private add failure at C:\\private\\config.toml" },
+    );
+
+    await expect(setupCodex({ force: true, packageVersion: VERSION, run })).resolves.toEqual({
+      ok: false,
+      changed: true,
+      message: `TraceLens Codex connection replacement failed. Register TraceLens manually: codex ${expectedAddArgs.join(" ")}`,
+    });
+    expect(run).toHaveBeenNthCalledWith(2, "codex", ["mcp", "remove", "tracelens"]);
+    expect(run).toHaveBeenNthCalledWith(3, "codex", expectedAddArgs);
+  });
+
+  it("reports a changed configuration when removal succeeds but replacement throws", async () => {
+    const run = vi.fn<CommandRunner>()
+      .mockResolvedValueOnce(conflict)
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockRejectedValueOnce(new Error("private add failure at C:\\private\\config.toml"));
+
+    await expect(setupCodex({ force: true, packageVersion: VERSION, run })).resolves.toEqual({
+      ok: false,
+      changed: true,
+      message: `TraceLens Codex connection replacement failed. Register TraceLens manually: codex ${expectedAddArgs.join(" ")}`,
+    });
+    expect(run).toHaveBeenNthCalledWith(2, "codex", ["mcp", "remove", "tracelens"]);
+    expect(run).toHaveBeenNthCalledWith(3, "codex", expectedAddArgs);
+  });
+});
+
+describe("runCli setup codex", () => {
+  it("uses the injected runner, prints the success message, and skips repository creation", async () => {
+    const run = runner(missing, { exitCode: 0, stdout: "", stderr: "" });
+    const cli = cliDependencies(run);
+    cli.deps.createRepository = vi.fn();
+
+    await expect(runCli(["setup", "codex"], cli.deps)).resolves.toBe(0);
+
+    expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
+    expect(cli.stdout.write).toHaveBeenCalledWith([
+      "TraceLens is connected to Codex. Start a new Codex task, then ask it to use TraceLens to inspect a run.",
+      "Evidence requested through TraceLens tools becomes part of the Codex conversation.",
+      "",
+    ].join("\n"));
+    expect(cli.stderr.write).not.toHaveBeenCalled();
+    expect(cli.deps.createRepository).not.toHaveBeenCalled();
+  });
+
+  it("derives the registered package version from package metadata", async () => {
+    vi.resetModules();
+    vi.doMock("../package.json", () => ({ default: { name: "tracelens", version: "9.8.7" } }));
+    try {
+      const { runCli: runCliWithMockedMetadata } = await import("./index");
+      const run = runner(missing, { exitCode: 0, stdout: "", stderr: "" });
+      const cli = cliDependencies(run);
+
+      await expect(runCliWithMockedMetadata(["setup", "codex"], cli.deps)).resolves.toBe(0);
+      expect(run).toHaveBeenNthCalledWith(2, "codex", [
+        "mcp", "add", "tracelens", "--", "npx", "-y", "tracelens@9.8.7", "mcp",
+      ]);
+    } finally {
+      vi.doUnmock("../package.json");
+      vi.resetModules();
+    }
   });
 });

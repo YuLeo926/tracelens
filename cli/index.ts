@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import packageMetadata from "../package.json";
 import { clipText } from "../src/core/session/sanitize";
 import type { SessionSummary } from "../src/core/session/types";
 import { parseArgs } from "./args";
@@ -19,6 +20,7 @@ const USAGE = [
   "Open the newest local session for this project, or select a session with list.",
 ].join("\n");
 const MAX_DISPLAY_LENGTH = 160;
+const PACKAGE_VERSION = packageMetadata.version;
 
 type CreateRepository = typeof createSessionRepository;
 type CreateViewer = (options: StartViewerOptions) => ViewerService;
@@ -193,7 +195,7 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
   if (args.command === "setup-codex") {
     const result = await setupCodex({
       force: args.force,
-      packageVersion: "0.2.0",
+      packageVersion: PACKAGE_VERSION,
       run: deps.runCommand ?? runCommand,
     });
     write(result.ok ? deps.stdout : deps.stderr, result.message);
@@ -222,7 +224,7 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
     }
     const viewer = (deps.createViewer ?? createViewerService)({ repository, webRoot: deps.webRoot });
     try {
-      await startMcp(repository, viewer, "0.2.0");
+      await startMcp(repository, viewer, PACKAGE_VERSION);
       return 0;
     } catch {
       write(deps.stderr, "Unable to start the TraceLens MCP server.");
