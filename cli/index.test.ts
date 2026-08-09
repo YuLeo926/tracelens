@@ -127,10 +127,12 @@ describe("runCli", () => {
 
   it("prints help without starting a viewer", async () => {
     const test = dependencies();
+    test.deps.resolveServeMcp = vi.fn();
 
     await expect(runCli(["--help"], test.deps)).resolves.toBe(0);
     expect(test.out.text()).toContain("Usage: tracelens");
     expect(test.deps.createViewer).not.toHaveBeenCalled();
+    expect(test.deps.resolveServeMcp).not.toHaveBeenCalled();
   });
 
   it("dispatches mcp without writing protocol-breaking output", async () => {
@@ -142,7 +144,19 @@ describe("runCli", () => {
     expect(test.deps.serveMcp).toHaveBeenCalledWith(test.repository, test.viewer, "0.2.0");
     expect(test.out.text()).toBe("");
     expect(test.deps.openBrowser).not.toHaveBeenCalled();
-    expect(test.viewer.close).toHaveBeenCalledOnce();
+    expect(test.viewer.close).not.toHaveBeenCalled();
+  });
+
+  it("resolves the MCP implementation dynamically only in MCP mode", async () => {
+    const test = dependencies();
+    const serve = vi.fn().mockResolvedValue(undefined);
+    test.deps.resolveServeMcp = vi.fn().mockResolvedValue(serve);
+
+    await expect(runCli(["mcp"], test.deps)).resolves.toBe(0);
+
+    expect(test.deps.resolveServeMcp).toHaveBeenCalledOnce();
+    expect(serve).toHaveBeenCalledWith(test.repository, test.viewer, "0.2.0");
+    expect(test.out.text()).toBe("");
   });
 
   it("returns after idle closure and removes signal listeners", async () => {

@@ -10,7 +10,6 @@ import { resolveWebRoot } from "./paths";
 import { createSessionRepository, type SessionRepository } from "./repository";
 import { selectRun } from "./selectRun";
 import { createViewerService, type StartViewerOptions, type ViewerService } from "./server";
-import { serveMcp } from "../mcp/server";
 
 const USAGE = [
   "Usage: tracelens [open [session-file] | list | mcp]",
@@ -21,7 +20,8 @@ const MAX_DISPLAY_LENGTH = 160;
 
 type CreateRepository = typeof createSessionRepository;
 type CreateViewer = (options: StartViewerOptions) => ViewerService;
-type ServeMcp = typeof serveMcp;
+type ServeMcp = typeof import("../mcp/server").serveMcp;
+type ResolveServeMcp = () => Promise<ServeMcp>;
 type RegisterSignal = (signal: NodeJS.Signals, listener: () => void) => () => void;
 type ShutdownResult<T> = { kind: "value"; value: T } | { kind: "error"; error: unknown } | { kind: "shutdown" };
 
@@ -36,6 +36,7 @@ export interface CliDependencies {
   createRepository?: CreateRepository;
   createViewer?: CreateViewer;
   serveMcp?: ServeMcp;
+  resolveServeMcp?: ResolveServeMcp;
   registerSignal?: RegisterSignal;
 }
 
@@ -53,6 +54,10 @@ function write(output: Pick<NodeJS.WriteStream, "write">, line: string): void {
 function registerProcessSignal(signal: NodeJS.Signals, listener: () => void): () => void {
   process.once(signal, listener);
   return () => process.off(signal, listener);
+}
+
+async function resolveServeMcp(): Promise<ServeMcp> {
+  return (await import("../mcp/server")).serveMcp;
 }
 
 function raceWithShutdown<T>(operation: Promise<T>, shutdown: Promise<void>): Promise<ShutdownResult<T>> {
@@ -172,15 +177,20 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
   }
 
   if (args.command === "mcp") {
+    let startMcp: ServeMcp;
+    try {
+      startMcp = deps.serveMcp ?? await (deps.resolveServeMcp ?? resolveServeMcp)();
+    } catch {
+      write(deps.stderr, "Unable to start the TraceLens MCP server.");
+      return 1;
+    }
     const viewer = (deps.createViewer ?? createViewerService)({ repository, webRoot: deps.webRoot });
     try {
-      await (deps.serveMcp ?? serveMcp)(repository, viewer, "0.2.0");
+      await startMcp(repository, viewer, "0.2.0");
       return 0;
     } catch {
       write(deps.stderr, "Unable to start the TraceLens MCP server.");
       return 1;
-    } finally {
-      await viewer.close().catch(() => undefined);
     }
   }
 
