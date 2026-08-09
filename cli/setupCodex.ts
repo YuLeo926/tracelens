@@ -43,7 +43,9 @@ function isMissing(result: CommandResult): boolean {
   if (result.exitCode !== 1) return false;
   const messages = [result.stdout, result.stderr].map((value) => value.trim()).filter(Boolean);
   if (messages.length !== 1) return false;
-  return /^(?:error:\s*)?mcp (?:server|registration)(?: named)? ['"]?tracelens['"]? (?:was )?not found[.!]?$/i.test(messages[0]);
+  const message = messages[0];
+  return /^(?:error:\s*)?no\s+mcp\s+(?:server|registration)\s+named\s+['"]?tracelens['"]?\s+found[.!]?$/i.test(message)
+    || /^(?:error:\s*)?mcp (?:server|registration)(?: named)? ['"]?tracelens['"]? (?:was )?not found[.!]?$/i.test(message);
 }
 
 function hasExpectedTransport(output: string, packageVersion: string): boolean | undefined {

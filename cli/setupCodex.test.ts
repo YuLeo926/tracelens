@@ -62,6 +62,20 @@ describe("setupCodex", () => {
     expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
   });
 
+  it("adds when Codex reports the official missing-registration error", async () => {
+    const run = runner(
+      { exitCode: 1, stdout: "", stderr: "Error: No MCP server named 'tracelens' found." },
+      { exitCode: 0, stdout: "", stderr: "" },
+    );
+
+    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    expect(run).toHaveBeenNthCalledWith(1, "codex", ["mcp", "get", "tracelens", "--json"]);
+    expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
+  });
+
   it("leaves an exact stdio registration unchanged", async () => {
     const run = runner(exact);
 
