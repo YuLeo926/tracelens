@@ -133,6 +133,18 @@ describe("runCli", () => {
     expect(test.deps.createViewer).not.toHaveBeenCalled();
   });
 
+  it("dispatches mcp without writing protocol-breaking output", async () => {
+    const test = dependencies();
+    test.deps.serveMcp = vi.fn().mockResolvedValue(undefined);
+
+    await expect(runCli(["mcp"], test.deps)).resolves.toBe(0);
+
+    expect(test.deps.serveMcp).toHaveBeenCalledWith(test.repository, test.viewer, "0.2.0");
+    expect(test.out.text()).toBe("");
+    expect(test.deps.openBrowser).not.toHaveBeenCalled();
+    expect(test.viewer.close).toHaveBeenCalledOnce();
+  });
+
   it("returns after idle closure and removes signal listeners", async () => {
     const test = dependencies();
     const running = runCli([], test.deps);

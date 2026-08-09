@@ -1,6 +1,7 @@
 export type ParsedArgs =
   | { command: "open"; file: string | undefined }
   | { command: "list" }
+  | { command: "mcp" }
   | { command: "help" }
   | { command: "unknown" };
 
@@ -19,6 +20,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (command === "list") {
     if (rest.length > 0) throw new Error("The list command does not accept additional arguments.");
     return { command: "list" };
+  }
+  if (command === "mcp") {
+    if (rest.length > 0) throw new Error("The mcp command does not accept additional arguments.");
+    return { command: "mcp" };
   }
   return { command: "unknown" };
 }

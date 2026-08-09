@@ -6,6 +6,7 @@ describe("parseArgs", () => {
     expect(parseArgs([])).toEqual({ command: "open", file: undefined });
     expect(parseArgs(["open", "run.jsonl"])).toEqual({ command: "open", file: "run.jsonl" });
     expect(parseArgs(["list"])).toEqual({ command: "list" });
+    expect(parseArgs(["mcp"])).toEqual({ command: "mcp" });
   });
 
   it("rejects extra file arguments", () => {

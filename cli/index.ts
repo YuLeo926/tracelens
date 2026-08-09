@@ -10,9 +10,10 @@ import { resolveWebRoot } from "./paths";
 import { createSessionRepository, type SessionRepository } from "./repository";
 import { selectRun } from "./selectRun";
 import { createViewerService, type StartViewerOptions, type ViewerService } from "./server";
+import { serveMcp } from "../mcp/server";
 
 const USAGE = [
-  "Usage: tracelens [open [session-file] | list]",
+  "Usage: tracelens [open [session-file] | list | mcp]",
   "",
   "Open the newest local session for this project, or select a session with list.",
 ].join("\n");
@@ -20,6 +21,7 @@ const MAX_DISPLAY_LENGTH = 160;
 
 type CreateRepository = typeof createSessionRepository;
 type CreateViewer = (options: StartViewerOptions) => ViewerService;
+type ServeMcp = typeof serveMcp;
 type RegisterSignal = (signal: NodeJS.Signals, listener: () => void) => () => void;
 type ShutdownResult<T> = { kind: "value"; value: T } | { kind: "error"; error: unknown } | { kind: "shutdown" };
 
@@ -33,6 +35,7 @@ export interface CliDependencies {
   openBrowser(url: string): Promise<boolean>;
   createRepository?: CreateRepository;
   createViewer?: CreateViewer;
+  serveMcp?: ServeMcp;
   registerSignal?: RegisterSignal;
 }
 
@@ -166,6 +169,19 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
   } catch {
     write(deps.stderr, "Unable to read local sessions.");
     return 1;
+  }
+
+  if (args.command === "mcp") {
+    const viewer = (deps.createViewer ?? createViewerService)({ repository, webRoot: deps.webRoot });
+    try {
+      await (deps.serveMcp ?? serveMcp)(repository, viewer, "0.2.0");
+      return 0;
+    } catch {
+      write(deps.stderr, "Unable to start the TraceLens MCP server.");
+      return 1;
+    } finally {
+      await viewer.close().catch(() => undefined);
+    }
   }
 
   let sessions: SessionSummary[];
