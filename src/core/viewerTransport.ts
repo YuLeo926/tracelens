@@ -42,13 +42,15 @@ export function createViewerClient(token: string, fetchImpl: typeof fetch = fetc
       if (!Array.isArray(payload) || !payload.every(isSessionSummary)) throw new Error(LOAD_FAILED);
       return payload;
     },
-    async loadSession(id: string): Promise<ViewerSessionPayload> {
-      const payload = await getJson(fetchImpl, `/api/sessions/${encodeURIComponent(id)}`, token);
+    async loadSession(id: string, eventId?: string): Promise<ViewerSessionPayload> {
+      const query = eventId === undefined ? "" : `?${new URLSearchParams({ event: eventId })}`;
+      const payload = await getJson(fetchImpl, `/api/sessions/${encodeURIComponent(id)}${query}`, token);
       if (
         !payload ||
         typeof payload !== "object" ||
         !isSessionSummary((payload as { session?: unknown }).session) ||
-        typeof (payload as { source?: unknown }).source !== "string"
+        typeof (payload as { source?: unknown }).source !== "string" ||
+        ("selectedEventId" in payload && typeof (payload as { selectedEventId?: unknown }).selectedEventId !== "string")
       ) {
         throw new Error(LOAD_FAILED);
       }

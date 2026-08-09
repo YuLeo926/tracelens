@@ -10,7 +10,7 @@ const DEFAULT_IDLE_MS = 30 * 60 * 1000;
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 
 export interface ViewerService {
-  getLink(sessionId: string, eventId?: string): Promise<string>;
+  getLink(sessionId: string, eventId?: string, publicEventId?: string): Promise<string>;
   close(): Promise<void>;
   closed: Promise<void>;
 }
@@ -97,6 +97,17 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
     resolveClosed = resolve;
   });
   let hasClosed = false;
+  const eventAliases = new Map<string, Map<string, string>>();
+
+  function registerEventAlias(sessionId: string, publicEventId: string, eventId: string): void {
+    const sessionAliases = eventAliases.get(sessionId) ?? new Map<string, string>();
+    sessionAliases.set(publicEventId, eventId);
+    eventAliases.set(sessionId, sessionAliases);
+  }
+
+  function resolveEventAlias(sessionId: string, publicEventId: string | null): string | undefined {
+    return publicEventId === null ? undefined : eventAliases.get(sessionId)?.get(publicEventId);
+  }
 
   function markClosed(): void {
     if (hasClosed) return;
@@ -157,7 +168,8 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
     }
   }
 
-  async function serveApi(request: IncomingMessage, response: ServerResponse, instance: RunningServer, pathname: string): Promise<void> {
+  async function serveApi(request: IncomingMessage, response: ServerResponse, instance: RunningServer, url: URL): Promise<void> {
+    const pathname = url.pathname;
     if (!tokenMatches(request.headers.authorization, token)) {
       sendJson(response, 401, { error: "Unauthorized" });
       return;
@@ -191,7 +203,12 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
       }
       try {
         const loaded = await options.repository.load(sessionId);
-        sendJson(response, 200, { session: loaded.summary, source: loaded.source });
+        const selectedEventId = resolveEventAlias(sessionId, url.searchParams.get("event"));
+        sendJson(response, 200, {
+          session: loaded.summary,
+          source: loaded.source,
+          ...(selectedEventId === undefined ? {} : { selectedEventId }),
+        });
         resetIdle(instance);
       } catch (error) {
         if (error instanceof SessionNotFoundError) sendJson(response, 404, { error: "Session not found" });
@@ -211,7 +228,7 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
         try {
           const url = new URL(request.url ?? "/", "http://127.0.0.1");
           if (url.pathname === API_PREFIX || url.pathname.startsWith(`${API_PREFIX}/`)) {
-            await serveApi(request, response, instance, url.pathname);
+            await serveApi(request, response, instance, url);
           } else {
             await serveStatic(request, response, webRoot, url.pathname);
           }
@@ -255,13 +272,18 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
 
   return {
     closed,
-    async getLink(sessionId, eventId) {
+    async getLink(sessionId, eventId, publicEventId) {
+      if (publicEventId !== undefined) {
+        if (eventId === undefined) throw new Error("A public event ID requires an event ID.");
+        registerEventAlias(sessionId, publicEventId, eventId);
+      }
       const instance = await ensureServer();
       const url = new URL(`http://127.0.0.1:${instance.port}${VIEWER_BASE}`);
+      const linkEventId = publicEventId ?? eventId;
       url.search = new URLSearchParams({
         mode: "session",
         session: sessionId,
-        ...(eventId === undefined ? {} : { event: eventId }),
+        ...(linkEventId === undefined ? {} : { event: linkEventId }),
       }).toString();
       url.hash = new URLSearchParams({ token }).toString();
       return url.toString();

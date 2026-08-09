@@ -92,6 +92,40 @@ describe("createViewerService", () => {
     await service.close();
   });
 
+  it("resolves a session-scoped opaque event alias without exposing the raw event in the link", async () => {
+    const rawEventId = "C:\\private\\traces\\event.json";
+    const eventAlias = `evt_${"c".repeat(64)}`;
+    const service = createViewerService({ repository: repository(), webRoot: await createWebRoot(), token });
+    const link = await service.getLink("session-1", rawEventId, eventAlias);
+    const url = new URL(link);
+
+    expect(url.searchParams.get("event")).toBe(eventAlias);
+    expect(decodeURIComponent(link)).not.toContain(rawEventId);
+
+    const loaded = await get(
+      url.origin,
+      `/api/sessions/session-1?event=${encodeURIComponent(eventAlias)}`,
+      authHeaders(),
+    );
+    expect(loaded.status).toBe(200);
+    expect(JSON.parse(loaded.body)).toEqual({
+      session: { id: "session-1", title: "Trace" },
+      source: '{"spans":[]}',
+      selectedEventId: rawEventId,
+    });
+
+    const otherSession = await get(
+      url.origin,
+      `/api/sessions/session-2?event=${encodeURIComponent(eventAlias)}`,
+      authHeaders(),
+    );
+    expect(JSON.parse(otherSession.body)).toEqual({
+      session: { id: "session-1", title: "Trace" },
+      source: '{"spans":[]}',
+    });
+    await service.close();
+  });
+
   it("keeps API and static routing contained under their intended roots", async () => {
     const root = await createWebRoot();
     const outside = await makeDirectory("tracelens-viewer-outside-");

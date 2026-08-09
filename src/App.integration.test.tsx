@@ -32,13 +32,20 @@ class Api {
   fetch = vi.fn<typeof fetch>((input) => {
     const url = String(input);
     if (url === "/api/sessions") return Promise.resolve(json(this.sessions));
-    const id = decodeURIComponent(url.slice("/api/sessions/".length));
+    const parsedUrl = new URL(url, "http://viewer.local");
+    const id = decodeURIComponent(parsedUrl.pathname.slice("/api/sessions/".length));
     this.calls.push(id);
     const next = deferred<Response>();
     this.pending.set(id, [...(this.pending.get(id) ?? []), next]);
     return next.promise;
   });
-  resolve(id: string, item: SessionSummary, source = trace(`${id}-event`), index = 0) { this.pending.get(id)?.[index]?.resolve(json({ session: item, source })); }
+  resolve(id: string, item: SessionSummary, source = trace(`${id}-event`), index = 0, selectedEventId?: string) {
+    this.pending.get(id)?.[index]?.resolve(json({
+      session: item,
+      source,
+      ...(selectedEventId === undefined ? {} : { selectedEventId }),
+    }));
+  }
   reject(id: string, message: string, index = 0) { this.pending.get(id)?.[index]?.reject(new Error(message)); }
 }
 
@@ -91,6 +98,23 @@ describe("App local session integration", () => {
     expect(host.querySelector('[data-span-id="known"]')).not.toBeNull();
     await act(async () => { window.history.pushState(null, "", route("local", "missing")); window.dispatchEvent(new PopStateEvent("popstate")); }); await flush();
     expect(host.textContent).toContain("Slowest events"); expect(host.textContent).not.toContain("Call tree");
+  });
+
+  it("selects the raw event resolved from an opaque viewer bootstrap alias", async () => {
+    const api = new Api();
+    const rawEventId = "C:\\private\\traces\\event.json";
+    const eventAlias = `evt_${"c".repeat(64)}`;
+    const local = summary("local", "Local", rawEventId);
+    api.sessions = [local];
+
+    await mount(api, route("local", eventAlias));
+    await act(async () => api.resolve("local", local, trace(rawEventId), 0, rawEventId));
+    await flush();
+
+    expect(window.location.search).toContain(`event=${eventAlias}`);
+    expect(decodeURIComponent(window.location.href)).not.toContain(rawEventId);
+    expect(host.textContent).toContain("Call tree");
+    expect(host.querySelector("[data-span-id]")?.getAttribute("data-span-id")).toBe(rawEventId);
   });
 
   it("rejects stale popstate loads and keeps a failed switch visible and retryable", async () => {

@@ -29,22 +29,28 @@ describe("readViewerToken", () => {
 
 describe("createViewerClient", () => {
   it("uses bearer authentication without putting the token in request URLs", async () => {
+    const eventAlias = `evt_${"c".repeat(64)}`;
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(response([{ id: "session-1" }]))
-      .mockResolvedValueOnce(response({ session: { id: "session-1" }, source: '{"spans":[]}' }));
+      .mockResolvedValueOnce(response({
+        session: { id: "session-1" },
+        source: '{"spans":[]}',
+        selectedEventId: "C:\\private\\traces\\event.json",
+      }));
     const client = createViewerClient(token, fetchImpl);
 
     await expect(client.listSessions()).resolves.toEqual([{ id: "session-1" }]);
-    await expect(client.loadSession("session / one")).resolves.toEqual({
+    await expect(client.loadSession("session / one", eventAlias)).resolves.toEqual({
       session: { id: "session-1" },
       source: '{"spans":[]}',
+      selectedEventId: "C:\\private\\traces\\event.json",
     });
 
     expect(fetchImpl).toHaveBeenNthCalledWith(1, "/api/sessions", {
       headers: { Authorization: `Bearer ${token}` },
     });
-    expect(fetchImpl).toHaveBeenNthCalledWith(2, "/api/sessions/session%20%2F%20one", {
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, `/api/sessions/session%20%2F%20one?event=${eventAlias}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(fetchImpl.mock.calls.map(([url]) => String(url))).not.toContain(token);

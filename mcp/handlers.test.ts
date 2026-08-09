@@ -161,7 +161,12 @@ describe("TraceLens MCP handlers", () => {
       expect(link.data).toMatchObject({ sessionId: test.summary.id, eventId });
       expect(new URL(link.data.url).searchParams.get("event")).toBe(eventId);
       expect(decodeURIComponent(link.data.url)).not.toContain(index === 0 ? windowsEventId : posixEventId);
-      expect(linkViewer.getLink).toHaveBeenNthCalledWith(index + 1, test.summary.id, index === 0 ? windowsEventId : posixEventId);
+      expect(linkViewer.getLink).toHaveBeenNthCalledWith(
+        index + 1,
+        test.summary.id,
+        index === 0 ? windowsEventId : posixEventId,
+        eventId,
+      );
     }
 
     expect(injectedRunner).not.toHaveBeenCalled();

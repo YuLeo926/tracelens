@@ -238,7 +238,7 @@ export function createTraceLensHandlers(repository: SessionRepository, viewer: V
       const ids = eventIdMap(loaded);
       const raw = eventId === undefined ? undefined : rawEventId(ids, eventId);
       try {
-        const url = await viewer.getLink(sessionId, raw);
+        const url = await viewer.getLink(sessionId, raw, eventId);
         return result({
           sessionId,
           ...(eventId === undefined ? {} : { eventId }),

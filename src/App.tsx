@@ -301,11 +301,11 @@ export default function App() {
     }
 
     const client = createViewerClient(token);
-    void Promise.all([client.loadSession(sessionId), client.listSessions()])
+    void Promise.all([client.loadSession(sessionId, route.eventId ?? undefined), client.listSessions()])
       .then(([payload, sessions]) => {
         if (cancelled || !isCurrentSessionRequest(sessionNavigationRef.current, request, route)) return;
         const parsed = parseTraceText(payload.source);
-        const selection = sessionEventSelection(route.eventId, parsed.byId, parsed.roots[0]?.spanId ?? null);
+        const selection = sessionEventSelection(payload.selectedEventId ?? route.eventId, parsed.byId, parsed.roots[0]?.spanId ?? null);
         const availableSessions = sessions.some((item) => item.id === payload.session.id)
           ? sessions
           : [payload.session, ...sessions];
