@@ -7,14 +7,15 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "npm run build:web && npm run build:cli",
+    "build": "npm run build:web && npm run typecheck:cli && npm run build:cli",
     "build:web": "npm run typecheck && vite build",
     "build:cli": "tsup",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "typecheck:cli": "tsc --project tsconfig.cli.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke:cli": "npm run build:cli && node cli/smoke.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

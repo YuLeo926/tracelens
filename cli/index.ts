@@ -1,5 +1,7 @@
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { clipText } from "../src/core/session/sanitize";
 import type { SessionSummary } from "../src/core/session/types";
 import { parseArgs } from "./args";
@@ -19,6 +21,7 @@ const MAX_DISPLAY_LENGTH = 160;
 type CreateRepository = typeof createSessionRepository;
 type CreateViewer = (options: StartViewerOptions) => ViewerService;
 type RegisterSignal = (signal: NodeJS.Signals, listener: () => void) => () => void;
+type ShutdownResult<T> = { kind: "value"; value: T } | { kind: "error"; error: unknown } | { kind: "shutdown" };
 
 export interface CliDependencies {
   homeDir: string;
@@ -49,23 +52,14 @@ function registerProcessSignal(signal: NodeJS.Signals, listener: () => void): ()
   return () => process.off(signal, listener);
 }
 
-async function waitForShutdown(viewer: ViewerService, registerSignal: RegisterSignal): Promise<void> {
-  let cleanups: Array<() => void> = [];
-  await new Promise<void>((resolve) => {
-    let closed = false;
-    const close = () => {
-      if (closed) return;
-      closed = true;
-      for (const cleanup of cleanups) cleanup();
-      resolve();
-    };
-    for (const signal of ["SIGINT", "SIGTERM"] as const) {
-      const cleanup = registerSignal(signal, close);
-      if (closed) cleanup();
-      else cleanups.push(cleanup);
-    }
-  });
-  await viewer.close();
+function raceWithShutdown<T>(operation: Promise<T>, shutdown: Promise<void>): Promise<ShutdownResult<T>> {
+  return Promise.race([
+    operation.then(
+      (value): ShutdownResult<T> => ({ kind: "value", value }),
+      (error): ShutdownResult<T> => ({ kind: "error", error }),
+    ),
+    shutdown.then((): ShutdownResult<T> => ({ kind: "shutdown" })),
+  ]);
 }
 
 function reportNoSessions(explicitFile: string | undefined, stderr: Pick<NodeJS.WriteStream, "write">): void {
@@ -78,20 +72,64 @@ function reportNoSessions(explicitFile: string | undefined, stderr: Pick<NodeJS.
 
 async function openSession(session: SessionSummary, repository: SessionRepository, deps: CliDependencies): Promise<number> {
   const viewer = (deps.createViewer ?? createViewerService)({ repository, webRoot: deps.webRoot });
+  const registerSignal = deps.registerSignal ?? registerProcessSignal;
+  const cleanups: Array<() => void> = [];
+  let resolveShutdown!: () => void;
+  const shutdown = new Promise<void>((resolve) => {
+    resolveShutdown = resolve;
+  });
+  let closePromise: Promise<void> | undefined;
+  let shutdownRequested = false;
+  const requestShutdown = (): Promise<void> => {
+    shutdownRequested = true;
+    resolveShutdown();
+    closePromise ??= viewer.close();
+    return closePromise;
+  };
+  void viewer.closed.then(resolveShutdown, resolveShutdown);
+
   try {
+    const onSignal = () => {
+      void requestShutdown().catch(() => undefined);
+    };
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      const cleanup = registerSignal(signal, onSignal);
+      if (shutdownRequested) cleanup();
+      else cleanups.push(cleanup);
+    }
+    if (shutdownRequested) {
+      await closePromise?.catch(() => undefined);
+      return 0;
+    }
+
     const reason = safeText(session.selectionReason);
     if (reason) write(deps.stdout, reason);
-    const url = await viewer.getLink(session.id);
-    if (!(await deps.openBrowser(url))) {
-      write(deps.stdout, "Unable to open a browser automatically. Open this URL:");
-      write(deps.stdout, url);
+    const link = await raceWithShutdown(viewer.getLink(session.id), shutdown);
+    if (link.kind === "shutdown") {
+      await closePromise?.catch(() => undefined);
+      return 0;
     }
-    await waitForShutdown(viewer, deps.registerSignal ?? registerProcessSignal);
+    if (link.kind === "error") throw link.error;
+
+    const browser = await raceWithShutdown(deps.openBrowser(link.value), shutdown);
+    if (browser.kind === "shutdown") {
+      await closePromise?.catch(() => undefined);
+      return 0;
+    }
+    if (browser.kind === "error") throw browser.error;
+    if (!browser.value) {
+      write(deps.stdout, "Unable to open a browser automatically. Open this URL:");
+      write(deps.stdout, link.value);
+    }
+    await Promise.race([viewer.closed, shutdown]);
+    await closePromise?.catch(() => undefined);
     return 0;
   } catch {
-    await viewer.close();
+    await requestShutdown().catch(() => undefined);
     write(deps.stderr, "Unable to start the TraceLens viewer.");
     return 1;
+  } finally {
+    for (const cleanup of cleanups) cleanup();
   }
 }
 
@@ -158,8 +196,22 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
   return openSession(sessions[0], repository, deps);
 }
 
-function isExecutedDirectly(): boolean {
-  return process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url;
+function canonicalFileUrl(filePath: string): string {
+  try {
+    const realpath = realpathSync.native ?? realpathSync;
+    return pathToFileURL(realpath(filePath)).href;
+  } catch {
+    return pathToFileURL(path.resolve(filePath)).href;
+  }
+}
+
+export function isExecutedDirectly(commandPath = process.argv[1], moduleUrl = import.meta.url): boolean {
+  if (commandPath === undefined) return false;
+  try {
+    return canonicalFileUrl(commandPath) === canonicalFileUrl(fileURLToPath(moduleUrl));
+  } catch {
+    return pathToFileURL(commandPath).href === moduleUrl;
+  }
 }
 
 if (isExecutedDirectly()) {

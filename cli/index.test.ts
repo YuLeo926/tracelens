@@ -1,9 +1,23 @@
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionSummary } from "../src/core/session/types";
 import type { SessionRepository } from "./repository";
 import type { ViewerService } from "./server";
-import { runCli, type CliDependencies } from "./index";
+import { isExecutedDirectly, runCli, type CliDependencies } from "./index";
+
+function deferred<T = void>(): { promise: Promise<T>; resolve(value: T): void; reject(reason: unknown): void } {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function session(id: string, selectionReason = "Matches current project."): SessionSummary {
   return {
@@ -32,7 +46,12 @@ function dependencies(sessions = [session("first")], input: Readable = Readable.
   const out = output();
   const err = output();
   const repository: SessionRepository = { list: vi.fn().mockResolvedValue(sessions), load: vi.fn(), refresh: vi.fn() };
-  const viewer: ViewerService = { getLink: vi.fn().mockResolvedValue("http://127.0.0.1:4444/tracelens/?mode=session&session=first#token=secret"), close: vi.fn().mockResolvedValue(undefined) };
+  const viewerClosed = deferred();
+  const viewer: ViewerService = {
+    getLink: vi.fn().mockResolvedValue("http://127.0.0.1:4444/tracelens/?mode=session&session=first#token=secret"),
+    close: vi.fn().mockImplementation(async () => viewerClosed.resolve()),
+    closed: viewerClosed.promise,
+  };
   const listeners = new Map<string, () => void>();
   const registerSignal = vi.fn((signal: NodeJS.Signals, listener: () => void) => {
     listeners.set(signal, listener);
@@ -50,7 +69,7 @@ function dependencies(sessions = [session("first")], input: Readable = Readable.
     createViewer: vi.fn().mockReturnValue(viewer),
     registerSignal,
   };
-  return { deps, out, err, repository, viewer, listeners, registerSignal };
+  return { deps, out, err, repository, viewer, viewerClosed, listeners, registerSignal };
 }
 
 async function settle(): Promise<void> {
@@ -112,5 +131,78 @@ describe("runCli", () => {
     await expect(runCli(["--help"], test.deps)).resolves.toBe(0);
     expect(test.out.text()).toContain("Usage: tracelens");
     expect(test.deps.createViewer).not.toHaveBeenCalled();
+  });
+
+  it("returns after idle closure and removes signal listeners", async () => {
+    const test = dependencies();
+    const running = runCli([], test.deps);
+    await settle();
+
+    test.viewerClosed.resolve();
+    await expect(running).resolves.toBe(0);
+    expect(test.viewer.close).not.toHaveBeenCalled();
+    expect(test.listeners.size).toBe(0);
+  });
+
+  it("registers shutdown before getLink and settles when interrupted during startup", async () => {
+    const test = dependencies();
+    const link = deferred<string>();
+    test.viewer.getLink = vi.fn().mockImplementation(() => {
+      expect(test.listeners.size).toBe(2);
+      return link.promise;
+    });
+
+    const running = runCli([], test.deps);
+    await settle();
+    test.listeners.get("SIGINT")?.();
+
+    await expect(running).resolves.toBe(0);
+    expect(test.viewer.close).toHaveBeenCalledOnce();
+    expect(test.listeners.size).toBe(0);
+  });
+
+  it("closes once when interrupted while opening the browser", async () => {
+    const test = dependencies();
+    const browser = deferred<boolean>();
+    test.deps.openBrowser = vi.fn().mockReturnValue(browser.promise);
+
+    const running = runCli([], test.deps);
+    await settle();
+    expect(test.deps.openBrowser).toHaveBeenCalledOnce();
+    test.listeners.get("SIGTERM")?.();
+
+    await expect(running).resolves.toBe(0);
+    expect(test.viewer.close).toHaveBeenCalledOnce();
+    expect(test.listeners.size).toBe(0);
+  });
+
+  it("closes and removes listeners when startup or browser launch fails", async () => {
+    const startup = dependencies();
+    startup.viewer.getLink = vi.fn().mockRejectedValue(new Error("cannot start"));
+
+    await expect(runCli([], startup.deps)).resolves.toBe(1);
+    expect(startup.viewer.close).toHaveBeenCalledOnce();
+    expect(startup.listeners.size).toBe(0);
+
+    const browser = dependencies();
+    browser.deps.openBrowser = vi.fn().mockRejectedValue(new Error("cannot open"));
+
+    await expect(runCli([], browser.deps)).resolves.toBe(1);
+    expect(browser.viewer.close).toHaveBeenCalledOnce();
+    expect(browser.listeners.size).toBe(0);
+  });
+});
+
+describe("isExecutedDirectly", () => {
+  it.skipIf(process.platform === "win32")("matches a symlinked executable to its canonical module path", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "tracelens-cli-link-"));
+    const target = fileURLToPath(import.meta.url);
+    const link = path.join(directory, "tracelens");
+    try {
+      await symlink(target, link);
+      expect(isExecutedDirectly(link, pathToFileURL(target).href)).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

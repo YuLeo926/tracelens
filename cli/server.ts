@@ -12,6 +12,7 @@ const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 export interface ViewerService {
   getLink(sessionId: string, eventId?: string): Promise<string>;
   close(): Promise<void>;
+  closed: Promise<void>;
 }
 
 export interface StartViewerOptions {
@@ -26,6 +27,7 @@ interface RunningServer {
   port: number;
   webRoot: string;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
+  stopPromise: Promise<void> | undefined;
 }
 
 type StaticResult = { kind: "found"; filePath: string } | { kind: "missing" } | { kind: "unsafe" };
@@ -90,11 +92,28 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
   const idleMs = Math.max(1, Math.floor(options.idleMs ?? DEFAULT_IDLE_MS));
   let running: RunningServer | undefined;
   let starting: Promise<RunningServer> | undefined;
+  let resolveClosed!: () => void;
+  const closed = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
+  let hasClosed = false;
+
+  function markClosed(): void {
+    if (hasClosed) return;
+    hasClosed = true;
+    resolveClosed();
+  }
 
   async function stop(instance: RunningServer): Promise<void> {
-    if (running === instance) running = undefined;
-    if (instance.idleTimer !== undefined) clearTimeout(instance.idleTimer);
-    await new Promise<void>((resolve) => instance.server.close(() => resolve()));
+    if (!instance.stopPromise) {
+      instance.stopPromise = (async () => {
+        if (running === instance) running = undefined;
+        if (instance.idleTimer !== undefined) clearTimeout(instance.idleTimer);
+        await new Promise<void>((resolve) => instance.server.close(() => resolve()));
+        markClosed();
+      })();
+    }
+    await instance.stopPromise;
   }
 
   function resetIdle(instance: RunningServer): void {
@@ -202,7 +221,7 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
         }
       })();
     });
-    instance = { server, port: 0, webRoot, idleTimer: undefined };
+    instance = { server, port: 0, webRoot, idleTimer: undefined, stopPromise: undefined };
 
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -235,6 +254,7 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
   }
 
   return {
+    closed,
     async getLink(sessionId, eventId) {
       const instance = await ensureServer();
       const url = new URL(`http://127.0.0.1:${instance.port}${VIEWER_BASE}`);
@@ -247,8 +267,12 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
       return url.toString();
     },
     async close() {
-      if (starting) await starting;
-      if (running) await stop(running);
+      try {
+        if (starting) await starting;
+        if (running) await stop(running);
+      } finally {
+        markClosed();
+      }
     },
   };
 }

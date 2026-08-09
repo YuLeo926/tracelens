@@ -123,4 +123,26 @@ describe("createViewerService", () => {
     await expect(get(restarted, "/api/sessions", authHeaders())).resolves.toMatchObject({ status: 200 });
     await service.close();
   });
+
+  it("resolves closed for both explicit and idle shutdown", async () => {
+    const explicit = createViewerService({ repository: repository(), webRoot: await createWebRoot(), token });
+    let explicitClosures = 0;
+    void explicit.closed.then(() => {
+      explicitClosures += 1;
+    });
+    await explicit.getLink("session-1");
+    await Promise.all([explicit.close(), explicit.close()]);
+    await expect(explicit.closed).resolves.toBeUndefined();
+    expect(explicitClosures).toBe(1);
+
+    const idle = createViewerService({ repository: repository(), webRoot: await createWebRoot(), token, idleMs: 10 });
+    let idleClosures = 0;
+    void idle.closed.then(() => {
+      idleClosures += 1;
+    });
+    await idle.getLink("session-1");
+    await expect(idle.closed).resolves.toBeUndefined();
+    await idle.close();
+    expect(idleClosures).toBe(1);
+  });
 });

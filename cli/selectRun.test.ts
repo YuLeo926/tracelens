@@ -39,4 +39,14 @@ describe("selectRun", () => {
   it("rejects end of input", async () => {
     await expect(selectRun([run("one", "First")], Readable.from([]), capture().output)).rejects.toThrow("Session selection was cancelled.");
   });
+
+  it("keeps a partial line buffered until its newline arrives", async () => {
+    const sessions = Array.from({ length: 12 }, (_, index) => run(String(index + 1), `Run ${index + 1}`));
+
+    await expect(selectRun(sessions, Readable.from(["1", "2\n"]), capture().output)).resolves.toMatchObject({ id: "12" });
+  });
+
+  it("processes a final unterminated selection at end of input", async () => {
+    await expect(selectRun([run("one", "First"), run("two", "Second")], Readable.from(["2"]), capture().output)).resolves.toMatchObject({ id: "two" });
+  });
 });

@@ -24,18 +24,29 @@ export async function selectRun(
   sessions.forEach((session, index) => output.write(`${sessionListLine(session, index)}\n`));
   output.write(`Select a session [1-${sessions.length}]: `);
 
+  let remainder = "";
+  const select = (value: string): SessionSummary | undefined => {
+    if (!value.trim()) return undefined;
+    const selected = Number(value.trim());
+    if (Number.isInteger(selected) && selected >= 1 && selected <= sessions.length) {
+      return sessions[selected - 1];
+    }
+    output.write(`Enter a number between 1 and ${sessions.length}.\n`);
+    output.write(`Select a session [1-${sessions.length}]: `);
+    return undefined;
+  };
+
   for await (const chunk of input) {
-    const values = String(chunk).split(/\r?\n/);
+    const values = (remainder + String(chunk)).split(/\r?\n/);
+    remainder = values.pop() ?? "";
     for (const value of values) {
-      if (!value.trim()) continue;
-      const selected = Number(value.trim());
-      if (Number.isInteger(selected) && selected >= 1 && selected <= sessions.length) {
-        return sessions[selected - 1];
-      }
-      output.write(`Enter a number between 1 and ${sessions.length}.\n`);
-      output.write(`Select a session [1-${sessions.length}]: `);
+      const session = select(value);
+      if (session) return session;
     }
   }
+
+  const session = select(remainder);
+  if (session) return session;
 
   throw new Error("Session selection was cancelled.");
 }
