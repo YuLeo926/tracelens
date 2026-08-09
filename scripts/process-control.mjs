@@ -63,6 +63,7 @@ class OwnedProcess {
     this.terminateTree = terminateTree;
     this.closed = false;
     this.exited = child.exitCode !== null || child.signalCode !== null;
+    this.posixGroupOwned = process.platform !== "win32" && group && terminateTree && !this.exited;
     this.exitPromise = this.exited
       ? Promise.resolve()
       : new Promise((resolve) => child.once("exit", () => {
@@ -71,6 +72,7 @@ class OwnedProcess {
         }));
     this.closePromise = new Promise((resolve) => child.once("close", () => {
       this.closed = true;
+      this.posixGroupOwned = false;
       registry.release(this);
       resolve();
     }));
@@ -84,6 +86,14 @@ class OwnedProcess {
     return !this.exited && !this.closed && this.child.exitCode === null && this.child.signalCode === null;
   }
 
+  get needsTermination() {
+    return this.isRunning || this.posixGroupOwned;
+  }
+
+  releasePosixGroup() {
+    this.posixGroupOwned = false;
+  }
+
   async waitForExit(timeoutMs) {
     if (!this.isRunning) return true;
     return settlesWithin(this.exitPromise, timeoutMs);
@@ -92,6 +102,11 @@ class OwnedProcess {
   async waitForClose(timeoutMs) {
     if (this.closed) return true;
     return settlesWithin(this.closePromise, timeoutMs);
+  }
+
+  async waitForTermination(timeoutMs) {
+    if (this.posixGroupOwned) return this.waitForClose(timeoutMs);
+    return this.waitForExit(timeoutMs);
   }
 
   destroyStreams() {
@@ -136,7 +151,7 @@ export class OwnedProcessRegistry {
       if (!owned) break;
       handled.add(owned);
       let terminationError;
-      for (let attempt = 0; owned.isRunning && attempt < 2; attempt += 1) {
+      for (let attempt = 0; owned.needsTermination && attempt < 2; attempt += 1) {
         try {
           await withHardTimeout(
             this.defaultTerminate(owned, {
@@ -153,11 +168,13 @@ export class OwnedProcessRegistry {
           terminationError = error;
         }
       }
+      if (owned.needsTermination) {
+        errors.push(new Error(`${owned.label} ${owned.pid ?? "without a PID"} survived final cleanup.`, { cause: terminationError }));
+        continue;
+      }
       owned.destroyStreams();
       const closed = await owned.waitForClose(closeWaitMs);
-      if (owned.isRunning) {
-        errors.push(new Error(`${owned.label} ${owned.pid ?? "without a PID"} survived final cleanup.`, { cause: terminationError }));
-      } else if (!closed) {
+      if (!closed) {
         errors.push(new Error(`${owned.label} ${owned.pid ?? "without a PID"} exited but did not close within ${closeWaitMs}ms.`, { cause: terminationError }));
       }
     }
@@ -188,14 +205,15 @@ async function runTerminationUtility(parentOwned, command, args, timeoutMs) {
 }
 
 function signalOwnedPosixProcess(owned, signal) {
-  if (!owned.isRunning) return;
+  if (!owned.needsTermination) return;
   const pid = owned.pid;
   if (!Number.isInteger(pid) || pid <= 0) throw new Error(`${owned.label} has no valid PID while its owned handle is running.`);
   try {
-    if (owned.group && owned.terminateTree) process.kill(-pid, signal);
+    if (owned.posixGroupOwned) process.kill(-pid, signal);
     else owned.child.kill(signal);
   } catch (error) {
     if (error?.code !== "ESRCH") throw error;
+    if (owned.posixGroupOwned) owned.releasePosixGroup();
   }
 }
 
@@ -221,19 +239,19 @@ export async function terminateOwnedProcess(owned, {
   utilityTimeoutMs = 1_500,
   forceImmediately = false,
 } = {}) {
-  if (!owned.isRunning) return { forced: false };
+  if (!owned.needsTermination) return { forced: false };
 
   if (!forceImmediately) {
     if (process.platform === "win32") await signalOwnedWindowsProcess(owned, false, utilityTimeoutMs);
     else signalOwnedPosixProcess(owned, "SIGTERM");
-    if (await owned.waitForExit(graceMs)) return { forced: false };
+    if (await owned.waitForTermination(graceMs)) return { forced: false };
   }
 
-  if (owned.isRunning) {
+  if (owned.needsTermination) {
     if (process.platform === "win32") await signalOwnedWindowsProcess(owned, true, utilityTimeoutMs);
     else signalOwnedPosixProcess(owned, "SIGKILL");
   }
-  if (!await owned.waitForExit(forceWaitMs)) {
+  if (!await owned.waitForTermination(forceWaitMs)) {
     throw new Error(`${owned.label} ${owned.pid ?? "without a PID"} survived forced termination.`);
   }
   return { forced: true };
@@ -296,9 +314,11 @@ export async function runCommand(command, args, {
     } catch (error) {
       terminationError = error;
     }
-    owned.destroyStreams();
-    await owned.waitForClose(250);
-    if (!suppliedRegistry && owned.isRunning) {
+    if (!owned.needsTermination) {
+      owned.destroyStreams();
+      await owned.waitForClose(250);
+    }
+    if (!suppliedRegistry && owned.needsTermination) {
       try { await registry.cleanup({ graceMs, forceWaitMs, utilityTimeoutMs }); } catch (error) {
         terminationError = new AggregateError([...(terminationError ? [terminationError] : []), error], `${command} local cleanup failed.`);
       }

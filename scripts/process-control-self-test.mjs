@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,16 @@ import {
 } from "./process-control.mjs";
 
 const TEMP_PREFIX = "tracelens-process-control-test-";
+const exitedLeaderFixture = fileURLToPath(new URL("./posix-exited-leader-fixture.mjs", import.meta.url));
+
+async function assertPortReleased(port) {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", resolve);
+  });
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
 
 export async function runProcessControlSelfTest() {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), TEMP_PREFIX));
@@ -54,6 +65,41 @@ export async function runProcessControlSelfTest() {
     processIds = JSON.parse(await readFile(markerPath, "utf8"));
     assert.equal(isProcessAlive(processIds.parent), false, "Timed-out parent process survived termination.");
     assert.equal(isProcessAlive(processIds.grandchild), false, "Timed-out grandchild process survived tree termination.");
+
+    if (process.platform === "win32") {
+      console.log("Skipped exited-leader process-group regression: Windows has no detached POSIX process groups.");
+    } else {
+      const exitedLeaderRegistry = new OwnedProcessRegistry();
+      registries.push(exitedLeaderRegistry);
+      const exitedLeaderMarker = path.join(temporaryRoot, "exited-leader.json");
+      const descendantReady = path.join(temporaryRoot, "exited-leader-descendant.ready");
+      let exitedLeaderError;
+      const exitedLeaderStartedAt = Date.now();
+      try {
+        await runCommand(process.execPath, [exitedLeaderFixture, "leader", exitedLeaderMarker, descendantReady], {
+          cwd: temporaryRoot,
+          registry: exitedLeaderRegistry,
+          timeoutMs: 800,
+          graceMs: 250,
+          forceWaitMs: 1_500,
+        });
+      } catch (error) {
+        exitedLeaderError = error;
+      }
+      const exitedLeaderElapsedMs = Date.now() - exitedLeaderStartedAt;
+      assert(exitedLeaderError instanceof CommandTimeoutError, "Inherited descendant stdio must keep the command pending until bounded cleanup.");
+      assert.equal(exitedLeaderError.ownedProcess.exited, true, "The detached group leader must exit before timeout cleanup starts.");
+      assert.equal(exitedLeaderError.ownedProcess.child.exitCode, 0, "The detached group leader must exit normally before cleanup signals its group.");
+      assert.equal(exitedLeaderError.forced, true, "The stubborn exited-leader group must require forced cleanup.");
+      assert(exitedLeaderElapsedMs < 6_000, `Exited-leader cleanup exceeded its hard test bound: ${exitedLeaderElapsedMs}ms.`);
+      const exitedLeaderIds = JSON.parse(await readFile(exitedLeaderMarker, "utf8"));
+      const descendantState = JSON.parse(await readFile(descendantReady, "utf8"));
+      assert.deepEqual(descendantState, { descendant: exitedLeaderIds.descendant, port: exitedLeaderIds.port }, "The inherited-stdio descendant must start and hold the TCP resource.");
+      assert.equal(isProcessAlive(exitedLeaderIds.leader), false, "The detached command leader must exit before cleanup.");
+      assert.equal(isProcessAlive(exitedLeaderIds.descendant), false, "Cleanup left the exited leader's process-group descendant alive.");
+      await assertPortReleased(exitedLeaderIds.port);
+      assert.equal(exitedLeaderRegistry.snapshot().length, 0, "Exited-leader group ownership must be released only after close.");
+    }
 
     const retryMarkerPath = path.join(temporaryRoot, "termination-retry.pid");
     let finalCleanupAttempts = 0;
@@ -101,7 +147,7 @@ export async function runProcessControlSelfTest() {
     staleChild.stdin = { destroy() {} };
     staleChild.stdout = { destroy() { queueMicrotask(() => staleChild.emit("close", 0, null)); } };
     staleChild.stderr = { destroy() {} };
-    staleRegistry.register(staleChild, { label: "stale PID fixture" });
+    staleRegistry.register(staleChild, { group: true, label: "stale PID fixture", terminateTree: true });
     await staleRegistry.cleanup();
     assert.equal(stalePidTerminationCalls, 0, "An exited owned handle must never authorize termination by a reused PID.");
   } finally {
