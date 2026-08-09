@@ -2,6 +2,7 @@ export type ParsedArgs =
   | { command: "open"; file: string | undefined }
   | { command: "list" }
   | { command: "mcp" }
+  | { command: "setup-codex"; force: boolean }
   | { command: "help" }
   | { command: "unknown" };
 
@@ -24,6 +25,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (command === "mcp") {
     if (rest.length > 0) throw new Error("The mcp command does not accept additional arguments.");
     return { command: "mcp" };
+  }
+  if (command === "setup") {
+    const [target, option, ...extra] = rest;
+    if (target !== "codex") throw new Error("Unsupported setup target.");
+    if (option === undefined) return { command: "setup-codex", force: false };
+    if (option === "--force" && extra.length === 0) return { command: "setup-codex", force: true };
+    throw new Error("Unsupported setup option.");
   }
   return { command: "unknown" };
 }

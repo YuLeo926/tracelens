@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,9 +11,10 @@ import { resolveWebRoot } from "./paths";
 import { createSessionRepository, type SessionRepository } from "./repository";
 import { selectRun } from "./selectRun";
 import { createViewerService, type StartViewerOptions, type ViewerService } from "./server";
+import { setupCodex, type CommandResult, type CommandRunner } from "./setupCodex";
 
 const USAGE = [
-  "Usage: tracelens [open [session-file] | list | mcp]",
+  "Usage: tracelens [open [session-file] | list | mcp | setup codex [--force]]",
   "",
   "Open the newest local session for this project, or select a session with list.",
 ].join("\n");
@@ -38,6 +40,7 @@ export interface CliDependencies {
   serveMcp?: ServeMcp;
   resolveServeMcp?: ResolveServeMcp;
   registerSignal?: RegisterSignal;
+  runCommand?: CommandRunner;
 }
 
 function safeText(value: string | undefined, fallback = ""): string {
@@ -58,6 +61,30 @@ function registerProcessSignal(signal: NodeJS.Signals, listener: () => void): ()
 
 async function resolveServeMcp(): Promise<ServeMcp> {
   return (await import("../mcp/server")).serveMcp;
+}
+
+function runCommand(command: string, args: string[]): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: CommandResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    let child;
+    try {
+      child = spawn(command, args, { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    } catch {
+      finish({ exitCode: 1, stdout: "", stderr: "" });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer | string) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer | string) => { stderr += chunk.toString(); });
+    child.once("error", () => finish({ exitCode: 1, stdout, stderr }));
+    child.once("close", (exitCode) => finish({ exitCode: exitCode ?? 1, stdout, stderr }));
+  });
 }
 
 function raceWithShutdown<T>(operation: Promise<T>, shutdown: Promise<void>): Promise<ShutdownResult<T>> {
@@ -162,6 +189,15 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
     write(deps.stderr, "Unknown command.");
     write(deps.stderr, USAGE);
     return 1;
+  }
+  if (args.command === "setup-codex") {
+    const result = await setupCodex({
+      force: args.force,
+      packageVersion: "0.2.0",
+      run: deps.runCommand ?? runCommand,
+    });
+    write(result.ok ? deps.stdout : deps.stderr, result.message);
+    return result.ok ? 0 : 1;
   }
 
   let repository: SessionRepository;
