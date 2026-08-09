@@ -4,15 +4,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import {
+  OwnedProcessRegistry,
   removeVerifiedSystemTempRoot,
   runCommand,
-  terminateProcessTree,
-  waitForProcessExit,
   withHardTimeout,
 } from "./process-control.mjs";
+import { OwnedStdioClientTransport } from "./owned-stdio-transport.mjs";
+import { resolveInstalledBinShim } from "./package-shim.mjs";
 import { runProcessControlSelfTest } from "./process-control-self-test.mjs";
+import { runPackageSmokeSelfTest } from "./package-smoke-self-test.mjs";
 
 const REQUIRED_PACKAGE_FILES = ["dist/index.html", "dist-cli/index.js", "README.md", "LICENSE"];
 const REQUIRED_TOOLS = [
@@ -26,6 +27,7 @@ const REQUIRED_TOOLS = [
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const npmCli = process.env.npm_execpath;
 const TEMP_PREFIX = "tracelens-package-smoke-";
+const ownedProcesses = new OwnedProcessRegistry();
 
 assert(npmCli, "npm_execpath is required; run this check through npm run pack:check.");
 
@@ -34,6 +36,7 @@ function run(command, args, options = {}) {
     cwd: options.cwd ?? repositoryRoot,
     env: options.env ?? process.env,
     timeoutMs: options.timeoutMs,
+    registry: ownedProcesses,
   });
 }
 
@@ -95,7 +98,7 @@ async function main() {
   let temporaryRoot;
   let client;
   let transport;
-  let mcpPid;
+  let mcpOwnedProcess;
   let mcpStderr = "";
   let mcpStderrDone;
   let primaryError;
@@ -136,9 +139,11 @@ async function main() {
     ], { cwd: installDirectory });
     console.log("Installed the generated tarball with lifecycle scripts disabled.");
 
-    const binDirectory = path.join(installDirectory, "node_modules", ".bin");
-    const binShim = path.join(binDirectory, process.platform === "win32" ? "tracelens.cmd" : "tracelens");
-    const help = await runNpm(["--prefix", installDirectory, "exec", "--", "tracelens", "--help"], { cwd: projectDirectory });
+    const shim = await resolveInstalledBinShim(installDirectory);
+    const help = await run(shim.command, [...shim.args, "--help"], {
+      cwd: projectDirectory,
+      env: shim.environment,
+    });
     for (const command of ["open", "list", "mcp", "setup codex"]) {
       assert(help.stdout.includes(command), `Installed CLI help is missing ${command}.`);
     }
@@ -152,15 +157,13 @@ async function main() {
         CODEX_HOME: codexHome,
       }).filter((entry) => typeof entry[1] === "string"),
     );
-    const installedEntry = path.join(installDirectory, "node_modules", "tracelens", "dist-cli", "index.js");
-    assert(binShim, "The installed npm bin shim must exist.");
-    transport = new StdioClientTransport({
+    transport = new OwnedStdioClientTransport({
       command: process.execPath,
-      args: [installedEntry, "mcp"],
+      args: [shim.installedEntry, "mcp"],
       cwd: projectDirectory,
       env: environment,
       stderr: "pipe",
-    });
+    }, ownedProcesses, { label: "installed MCP child" });
     const stderrStream = transport.stderr;
     assert(stderrStream, "MCP stderr must be piped for shutdown verification.");
     stderrStream.on("data", (chunk) => { mcpStderr += chunk.toString(); });
@@ -170,17 +173,21 @@ async function main() {
       stderrStream.once("error", reject);
     });
     client = new Client({ name: "tracelens-package-smoke", version: "1.0.0" });
-    await client.connect(transport);
-    mcpPid = transport.pid;
-    assert(Number.isInteger(mcpPid) && mcpPid > 0, "MCP transport must expose the installed child PID.");
+    await withHardTimeout(client.connect(transport), 10_000, "MCP client connect");
+    mcpOwnedProcess = transport.ownedProcess;
+    assert(mcpOwnedProcess, "MCP transport must retain the exact installed child process handle.");
 
-    const listedTools = await client.listTools();
+    const listedTools = await withHardTimeout(client.listTools(), 5_000, "MCP listTools");
     assert.deepEqual(listedTools.tools.map((tool) => tool.name).sort(), [...REQUIRED_TOOLS].sort());
 
-    const listedSessions = await client.callTool({
-      name: "list_sessions",
-      arguments: { scope: "current_project", limit: 5 },
-    });
+    const listedSessions = await withHardTimeout(
+      client.callTool({
+        name: "list_sessions",
+        arguments: { scope: "current_project", limit: 5 },
+      }),
+      5_000,
+      "MCP list_sessions",
+    );
     const result = assertCompleteToolResult(listedSessions, [temporaryRoot, homeDirectory, codexHome, projectDirectory]);
     assert(result && result.dataClassification === "untrusted-local-log", "list_sessions must classify returned evidence.");
     assert(Array.isArray(result.data) && result.data.length === 1, "Current-project discovery must find the injected sample.");
@@ -202,16 +209,14 @@ async function main() {
         cleanupErrors.push(error);
       }
     }
-    if (mcpPid) {
-      try {
-        if (!await waitForProcessExit(mcpPid, 2_000, { group: false })) {
-          cleanupErrors.push(new Error(`Installed MCP child ${mcpPid} survived normal shutdown.`));
-          await terminateProcessTree(mcpPid, { group: false });
-        }
-        assert.equal(await waitForProcessExit(mcpPid, 500, { group: false }), true, `Installed MCP child ${mcpPid} is still running.`);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
+    mcpOwnedProcess ??= transport?.ownedProcess;
+    try {
+      await ownedProcesses.cleanup();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (mcpOwnedProcess?.isRunning) {
+      cleanupErrors.push(new Error(`Installed MCP child ${mcpOwnedProcess.pid ?? "without a PID"} survived shutdown cleanup.`));
     }
     if (mcpStderrDone) {
       try {
@@ -238,5 +243,7 @@ async function main() {
 
 await runProcessControlSelfTest();
 console.log("Verified bounded process-tree timeout escalation and cleanup.");
+await runPackageSmokeSelfTest();
+console.log("Verified local-shim isolation, ownership semantics, and connect-failure cleanup.");
 await main();
 console.log("Package smoke test passed and temporary resources were removed.");
