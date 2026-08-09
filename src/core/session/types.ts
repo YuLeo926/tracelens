@@ -13,6 +13,7 @@ export interface EventRef {
   durationMs: number;
   tokensIn?: number;
   tokensOut?: number;
+  tokenSharePercent?: number;
 }
 
 export interface EventPreview extends EventRef {
@@ -26,6 +27,7 @@ export interface RepeatedOperationFact {
   count: number;
   failureCount: number;
   eventIds: string[];
+  eventIdsOmitted: number;
 }
 
 export interface RunFacts {

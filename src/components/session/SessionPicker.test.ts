@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { nextDialogFocusIndex, rankedSessions, sessionProject, sessionTitle } from "./SessionPicker";
+import { SessionPicker } from "./SessionPicker";
 import type { SessionSummary } from "../../core/session/types";
 
 function session(id: string, match: SessionSummary["match"], modifiedAt: number): SessionSummary {
@@ -58,5 +61,22 @@ describe("SessionPicker display model", () => {
     ]);
 
     expect(rows.map((item) => item.id)).toEqual(["exact-new", "exact-old", "related", "fallback-new"]);
+  });
+
+  it("allows long unbroken title and project metadata to wrap in the packed 390 px dialog", () => {
+    const item = session("long", "exact", 1);
+    item.title = "t".repeat(400);
+    item.project = "p".repeat(400);
+    const html = renderToStaticMarkup(createElement(SessionPicker, {
+      sessions: [item],
+      activeId: "long",
+      loading: false,
+      error: null,
+      onSelect: () => undefined,
+      onClose: () => undefined,
+    }));
+
+    expect(html).toMatch(/data-session-title=""[^>]*class="[^"]*break-all/);
+    expect(html).toMatch(/data-session-project=""[^>]*class="[^"]*break-all/);
   });
 });

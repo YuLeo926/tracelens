@@ -71,6 +71,25 @@ describe("discoverSessionCandidates", () => {
 
     await expect(discoverSessionCandidates({ homeDir: home, cwd })).resolves.toEqual([]);
   });
+
+  it("reads real 256 KiB head and tail windows without requiring the middle of a large JSONL file", async () => {
+    const home = await makeHome();
+    const cwd = path.join(home, "work", "tracelens");
+    const file = path.join(home, ".claude", "projects", "tracelens", "large.jsonl");
+    const records = [
+      JSON.stringify({ type: "user", timestamp: "2026-07-31T09:00:00.000Z", cwd, message: { role: "user", content: "Boundary run" } }),
+      JSON.stringify({ type: "progress", content: "x".repeat(512 * 1024) }),
+      JSON.stringify({ type: "assistant", timestamp: "2026-07-31T09:05:00.000Z", message: { role: "assistant", stop_reason: "end_turn", content: "Done" } }),
+    ];
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, `${records.join("\n")}\n`);
+
+    const candidates = await discoverSessionCandidates({ homeDir: home, cwd });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ provider: "claude", title: "Boundary run", lifecycle: "complete", match: "exact" });
+    expect(candidates[0].sizeBytes).toBeGreaterThan(2 * 256 * 1024);
+  });
 });
 
 describe("rankSessionCandidates", () => {
@@ -124,5 +143,62 @@ describe("rankSessionCandidates", () => {
     };
 
     expect(rankSessionCandidates([candidate], "c:\\users\\ada\\work\\tracelens")[0].match).toBe("exact");
+  });
+
+  it("ranks nearest POSIX parents and children before farther related paths", () => {
+    const candidate = (id: string, projectPath: string, modifiedAt: number): SessionCandidate => ({
+      id,
+      path: `/logs/${id}.jsonl`,
+      provider: "codex",
+      project: id,
+      projectPath,
+      modifiedAt,
+      sizeBytes: 1,
+      lifecycle: "complete",
+      match: "fallback",
+    });
+    const cwd = "/workspace/team/tracelens";
+    const ranked = rankSessionCandidates([
+      candidate("far-parent", "/workspace", 500),
+      candidate("near-parent", "/workspace/team", 100),
+      candidate("far-child", "/workspace/team/tracelens/packages/ui/src", 400),
+      candidate("near-child", "/workspace/team/tracelens/packages", 200),
+      candidate("segment-prefix", "/workspace/team/tracelens-old", 900),
+    ], cwd);
+
+    expect(ranked.map((item) => [item.id, item.match])).toEqual([
+      ["near-child", "related"],
+      ["near-parent", "related"],
+      ["far-parent", "related"],
+      ["far-child", "related"],
+      ["segment-prefix", "fallback"],
+    ]);
+  });
+
+  it("ranks Windows path distance case-insensitively with segment boundaries", () => {
+    const candidate = (id: string, projectPath: string, modifiedAt: number): SessionCandidate => ({
+      id,
+      path: `C:\\logs\\${id}.jsonl`,
+      provider: "codex",
+      project: id,
+      projectPath,
+      modifiedAt,
+      sizeBytes: 1,
+      lifecycle: "complete",
+      match: "fallback",
+    });
+    const ranked = rankSessionCandidates([
+      candidate("far-parent", "C:\\Users\\Ada", 500),
+      candidate("near-parent", "c:/users/ada/work", 100),
+      candidate("near-child", "C:\\USERS\\ADA\\WORK\\TraceLens\\packages", 200),
+      candidate("segment-prefix", "C:\\Users\\Ada\\Work\\TraceLens-old", 900),
+    ], "C:\\Users\\Ada\\Work\\TraceLens");
+
+    expect(ranked.map((item) => [item.id, item.match])).toEqual([
+      ["near-child", "related"],
+      ["near-parent", "related"],
+      ["far-parent", "related"],
+      ["segment-prefix", "fallback"],
+    ]);
   });
 });

@@ -19,4 +19,10 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["setup", "claude"])).toThrow("Unsupported setup target.");
     expect(() => parseArgs(["setup", "codex", "--invalid"])).toThrow("Unsupported setup option.");
   });
+
+  it("rejects repeated force flags and every extra setup argument", () => {
+    expect(() => parseArgs(["setup", "codex", "--force", "--force"])).toThrow("Unsupported setup option.");
+    expect(() => parseArgs(["setup", "codex", "--force", "extra"])).toThrow("Unsupported setup option.");
+    expect(() => parseArgs(["setup", "codex", "extra", "--force"])).toThrow("Unsupported setup option.");
+  });
 });

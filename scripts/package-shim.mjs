@@ -18,18 +18,35 @@ function trustedEnvironment() {
   return Object.fromEntries(Object.entries(environment).filter((entry) => typeof entry[1] === "string"));
 }
 
-function powerShellInvocationTargets(shimText) {
+export function installedShimInvocation(shim, subcommand, environmentOverrides = {}) {
+  assert(shim && typeof shim.command === "string" && Array.isArray(shim.args), "A verified installed shim is required.");
+  assert(typeof subcommand === "string" && /^--?[a-z-]+$|^[a-z-]+$/i.test(subcommand), "A safe installed shim subcommand is required.");
+  const commandHostShim = shim.environment?.TRACELENS_VERIFIED_SHIM;
+  return {
+    command: shim.command,
+    args: commandHostShim === undefined
+      ? [...shim.args, subcommand]
+      : [...shim.args, `%TRACELENS_VERIFIED_SHIM% ${subcommand}`],
+    env: {
+      ...shim.environment,
+      ...environmentOverrides,
+      npm_config_offline: "true",
+    },
+    shell: false,
+  };
+}
+
+function commandShimTargets(shimText) {
   const invocationLines = shimText
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => !line.startsWith("#") && line.includes("&") && line.includes("$args"));
+    .filter((line) => !/^@?(?:rem\b|::)/i.test(line) && line.includes("%*"));
   assert(invocationLines.length > 0, "The local npm bin shim must invoke the installed tracelens entry.");
   return invocationLines.map((line) => {
-    const match = line.match(/&\s+(?:"[^"]+"|'[^']+')\s+(?:"([^"]+)"|'([^']+)')\s+\$args(?:\s|$)/i);
-    assert(match, "Every PowerShell shim command must pass arguments directly to one quoted entry path.");
-    const target = match[1] ?? match[2];
-    assert(/^\$basedir[\\/]/i.test(target), "The PowerShell shim entry must be relative to its own local bin directory.");
-    return target.replace(/^\$basedir[\\/]/i, "");
+    const match = line.match(/"(%dp0%[\\/][^"]+)"\s+%\*(?:\s|$)/i);
+    assert(match, "Every command shim invocation must pass arguments directly to one quoted entry path.");
+    assert(/^%dp0%[\\/]/i.test(match[1]), "The command shim entry must be relative to its own local bin directory.");
+    return match[1].replace(/^%dp0%[\\/]/i, "");
   });
 }
 
@@ -46,16 +63,16 @@ export async function resolveInstalledBinShim(installDirectory) {
   assert(isWithin(resolvedPackage, resolvedEntry), "The installed tracelens entry must remain inside the installed package.");
 
   if (process.platform === "win32") {
-    const shimPath = path.join(binDirectory, "tracelens.ps1");
+    const shimPath = path.join(binDirectory, "tracelens.cmd");
     let shimText;
     try {
       const stats = await lstat(shimPath);
-      assert(stats.isFile(), "The local npm bin shim must be a regular PowerShell file.");
+      assert(stats.isFile(), "The local npm bin shim must be a regular command file.");
       shimText = await readFile(shimPath, "utf8");
     } catch (error) {
       throw new Error(`Local npm bin shim is missing or unreadable: ${shimPath}`, { cause: error });
     }
-    for (const target of powerShellInvocationTargets(shimText)) {
+    for (const target of commandShimTargets(shimText)) {
       let resolvedTarget;
       try {
         resolvedTarget = await realpath(path.resolve(binDirectory, target));
@@ -65,12 +82,12 @@ export async function resolveInstalledBinShim(installDirectory) {
       assert.equal(path.normalize(resolvedTarget), path.normalize(resolvedEntry), "The local npm bin shim must target the installed tracelens entry.");
     }
     const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
-    const powershell = path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-    await access(powershell);
+    const commandHost = process.env.ComSpec ?? path.join(systemRoot, "System32", "cmd.exe");
+    await access(commandHost);
     return {
-      command: powershell,
-      args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", shimPath],
-      environment: trustedEnvironment(),
+      command: commandHost,
+      args: ["/d", "/v:off", "/s", "/c"],
+      environment: { ...trustedEnvironment(), TRACELENS_VERIFIED_SHIM: `"${shimPath}"` },
       installedEntry: resolvedEntry,
       shimPath,
     };

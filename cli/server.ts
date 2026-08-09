@@ -2,7 +2,11 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { SessionNotFoundError, type SessionRepository } from "./repository";
+import { publicEventId } from "../src/core/session/publicIds";
+import { redactText, safeAttributes } from "../src/core/session/sanitize";
+import type { RunFacts, SessionSummary } from "../src/core/session/types";
+import type { RunNode } from "../src/core/types";
+import { SessionNotFoundError, type LoadedSession, type SessionRepository } from "./repository";
 
 const API_PREFIX = "/api";
 const VIEWER_BASE = "/tracelens/";
@@ -54,16 +58,77 @@ function contentType(filePath: string): string {
   }
 }
 
+function sanitizeOutput(value: unknown): unknown {
+  if (typeof value === "string") return redactText(value);
+  if (Array.isArray(value)) return value.map(sanitizeOutput);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [redactText(key), sanitizeOutput(nested)]));
+  }
+  return value;
+}
+
+function publicFacts(facts: RunFacts, sessionId: string): RunFacts {
+  const publicRef = <T extends { eventId: string }>(event: T): T => ({
+    ...event,
+    eventId: publicEventId(sessionId, event.eventId),
+  });
+  return {
+    ...facts,
+    errorEvents: facts.errorEvents.map(publicRef),
+    slowestEvents: facts.slowestEvents.map(publicRef),
+    highestTokenEvents: facts.highestTokenEvents.map(publicRef),
+    repeatedOperations: facts.repeatedOperations.map((operation) => ({
+      ...operation,
+      eventIds: operation.eventIds.map((eventId) => publicEventId(sessionId, eventId)),
+    })),
+  };
+}
+
+function publicSummary(summary: SessionSummary): SessionSummary {
+  return { ...summary, facts: publicFacts(summary.facts, summary.id) };
+}
+
+function publicSpan(node: RunNode, sessionId: string): Record<string, unknown> {
+  const attributes = safeAttributes(node.attributes);
+  attributes["openinference.span.kind"] = node.kind.toUpperCase();
+  if (node.input !== undefined) attributes["input.value"] = redactText(node.input);
+  if (node.output !== undefined) attributes["output.value"] = redactText(node.output);
+  if (node.model !== undefined) attributes["llm.model_name"] = redactText(node.model);
+  if (node.tokensIn !== undefined) attributes["gen_ai.usage.input_tokens"] = node.tokensIn;
+  if (node.tokensOut !== undefined) attributes["gen_ai.usage.output_tokens"] = node.tokensOut;
+  if (node.costUsd !== undefined) attributes["gen_ai.usage.cost"] = node.costUsd;
+  return {
+    span_id: publicEventId(sessionId, node.spanId),
+    parent_span_id: node.parentSpanId === null ? null : publicEventId(sessionId, node.parentSpanId),
+    trace_id: `trace_${sessionId}`,
+    name: redactText(node.name),
+    start_time: node.startMs,
+    end_time: node.endMs,
+    status_code: node.status.toUpperCase(),
+    ...(node.statusMessage === undefined ? {} : { status_message: redactText(node.statusMessage) }),
+    attributes,
+  };
+}
+
+function publicSource(loaded: LoadedSession): string {
+  return JSON.stringify({
+    spans: [...loaded.trace.byId.values()].map((node) => publicSpan(node, loaded.summary.id)),
+  });
+}
+
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, {
     "cache-control": "no-store",
     "content-type": "application/json; charset=utf-8",
   });
-  response.end(JSON.stringify(payload));
+  response.end(JSON.stringify(sanitizeOutput(payload)));
 }
 
-function sendNotFound(response: ServerResponse): void {
-  response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+function sendNotFound(response: ServerResponse, noStore = false): void {
+  response.writeHead(404, {
+    ...(noStore ? { "cache-control": "no-store" } : {}),
+    "content-type": "text/plain; charset=utf-8",
+  });
   response.end("Not found");
 }
 
@@ -175,13 +240,14 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
       return;
     }
     if (request.method !== "GET") {
-      sendNotFound(response);
+      sendNotFound(response, true);
       return;
     }
 
     if (pathname === "/api/sessions") {
       try {
-        sendJson(response, 200, await options.repository.list());
+        const summaries = await options.repository.list();
+        sendJson(response, 200, summaries.map(publicSummary));
         resetIdle(instance);
       } catch {
         sendJson(response, 500, { error: "Unable to list sessions" });
@@ -194,20 +260,20 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
       try {
         sessionId = decodeURIComponent(pathname.slice("/api/sessions/".length));
       } catch {
-        sendNotFound(response);
+        sendNotFound(response, true);
         return;
       }
       if (!sessionId) {
-        sendNotFound(response);
+        sendNotFound(response, true);
         return;
       }
       try {
         const loaded = await options.repository.load(sessionId);
         const selectedEventId = resolveEventAlias(sessionId, url.searchParams.get("event"));
         sendJson(response, 200, {
-          session: loaded.summary,
-          source: loaded.source,
-          ...(selectedEventId === undefined ? {} : { selectedEventId }),
+          session: publicSummary(loaded.summary),
+          source: publicSource(loaded),
+          ...(selectedEventId === undefined ? {} : { selectedEventId: publicEventId(sessionId, selectedEventId) }),
         });
         resetIdle(instance);
       } catch (error) {
@@ -217,7 +283,7 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
       return;
     }
 
-    sendNotFound(response);
+    sendNotFound(response, true);
   }
 
   async function start(): Promise<RunningServer> {

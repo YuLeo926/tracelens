@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 import type { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import { describe, expect, it, vi } from "vitest";
+import { parseTrace } from "../src/core/parse";
+import { buildRunFacts, FACT_NAME_CHARS, REPEATED_EVENT_ID_LIMIT } from "../src/core/session/facts";
 import type { SessionRepository } from "../cli/repository";
 import type { ViewerService } from "../cli/server";
 import type { TraceLensHandlers } from "./handlers";
@@ -91,16 +93,69 @@ describe("MCP tool registration", () => {
     for (const limit of [0, 21, 1.5]) expect(tool(tools, "list_sessions").inputSchema.safeParse({ limit }).success).toBe(false);
 
     expect(tool(tools, "get_session_timeline").inputSchema.safeParse({ sessionId: "s", cursor: "0", limit: 50 }).success).toBe(true);
+    expect(tool(tools, "get_session_timeline").inputSchema.safeParse({ sessionId: "s", cursor: String(Number.MAX_SAFE_INTEGER) }).success).toBe(true);
     for (const value of [{ sessionId: "s", limit: 51 }, { sessionId: "s", cursor: "-1" }, { sessionId: "s", cursor: "1.5" }]) {
       expect(tool(tools, "get_session_timeline").inputSchema.safeParse(value).success).toBe(false);
     }
+    expect(tool(tools, "get_session_timeline").inputSchema.safeParse({ sessionId: "s", cursor: String(Number.MAX_SAFE_INTEGER + 1) }).success).toBe(false);
 
     expect(tool(tools, "search_session").inputSchema.safeParse({ sessionId: "s", query: "q", limit: 20 }).success).toBe(true);
     expect(tool(tools, "search_session").inputSchema.safeParse({ sessionId: "s", query: "q", limit: 21 }).success).toBe(false);
+    expect(tool(tools, "search_session").inputSchema.safeParse({ sessionId: "s", query: "q", cursor: String(Number.MAX_SAFE_INTEGER + 1) }).success).toBe(false);
     expect(tool(tools, "get_event_detail").inputSchema.safeParse({ sessionId: "s", eventId: validEventId }).success).toBe(true);
     expect(tool(tools, "get_event_detail").inputSchema.safeParse({ sessionId: "s", eventId: windowsEventPath() }).success).toBe(false);
     expect(tool(tools, "get_viewer_link").inputSchema.safeParse({ sessionId: "s", eventId: validEventId }).success).toBe(true);
     expect(tool(tools, "get_viewer_link").inputSchema.safeParse({ sessionId: "s", eventId: "/var/private/event" }).success).toBe(false);
+  });
+
+  it("serializes bounded overview and listing facts in both MCP result forms", async () => {
+    const longName = `operation-${"x".repeat(FACT_NAME_CHARS * 4)}`;
+    const trace = parseTrace({
+      spans: Array.from({ length: REPEATED_EVENT_ID_LIMIT + 12 }, (_, index) => ({
+        span_id: `event-${index}`,
+        trace_id: "trace",
+        name: longName,
+        start_time: index,
+        end_time: index + 1,
+        status_code: "OK",
+        attributes: {
+          "openinference.span.kind": "TOOL",
+          "input.value": '{"command":"npm test"}',
+        },
+      })),
+    });
+    const summary = {
+      id: "session-1",
+      provider: "codex" as const,
+      modifiedAt: 1,
+      sizeBytes: 1,
+      lifecycle: "complete" as const,
+      match: "exact" as const,
+      selectionReason: "Matches current project.",
+      facts: buildRunFacts(trace, "complete"),
+    };
+    const handlers = {
+      listSessions: vi.fn().mockResolvedValue({ dataClassification: "untrusted-local-log", data: Array(20).fill(summary) }),
+      getSessionOverview: vi.fn().mockResolvedValue({ dataClassification: "untrusted-local-log", data: summary }),
+    } as unknown as TraceLensHandlers;
+    const tools = registration(handlers);
+
+    for (const [name, args] of [["list_sessions", {}], ["get_session_overview", { sessionId: "session-1" }]] as const) {
+      const response = await tool(tools, name).handler(args);
+      const parsedText = JSON.parse(response.content[0].text);
+      expect(parsedText).toEqual(response.structuredContent);
+      const summaries = name === "list_sessions"
+        ? (response.structuredContent.data as typeof summary[])
+        : [response.structuredContent.data as typeof summary];
+      for (const item of summaries) {
+        expect(item.facts.repeatedOperations).toHaveLength(1);
+        expect(item.facts.repeatedOperations[0].eventIds).toHaveLength(REPEATED_EVENT_ID_LIMIT);
+        expect(item.facts.repeatedOperations[0].eventIdsOmitted).toBe(12);
+        expect(item.facts.repeatedOperations[0].operationName.length).toBeLessThanOrEqual(FACT_NAME_CHARS);
+        expect(item.facts.slowestEvents.every((event) => event.name.length <= FACT_NAME_CHARS)).toBe(true);
+      }
+      expect(response.content[0].text.length).toBeLessThan(300_000);
+    }
   });
 
   it("sanitizes unexpected handler errors at the protocol boundary", async () => {

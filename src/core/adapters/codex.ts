@@ -19,6 +19,8 @@ interface CodexEvent {
   thread_id?: string;
   item?: CodexItem;
   usage?: { input_tokens?: number; output_tokens?: number };
+  timestamp?: unknown;
+  start_time?: unknown;
 }
 
 const KIND_BY_ITEM: Record<string, string> = {
@@ -45,33 +47,43 @@ function execToLooseSpans(events: CodexEvent[]): LooseSpan[] {
   let threadId: string | undefined;
   let usage: { input_tokens?: number; output_tokens?: number } | undefined;
   let turnFailed = false;
-  const items = new Map<string, CodexItem>();
+  const items = new Map<string, { item: CodexItem; startMs?: number; endMs?: number }>();
   const order: string[] = [];
+  const observedTimes: number[] = [];
 
   for (const ev of events) {
+    const eventMs = execTimestampMs(ev.timestamp ?? ev.start_time);
+    if (eventMs !== undefined) observedTimes.push(eventMs);
     if (ev.type === "thread.started") threadId = ev.thread_id ?? threadId;
     else if (ev.type === "turn.completed") usage = ev.usage ?? usage;
     else if (ev.type === "turn.failed") turnFailed = true;
     else if ((ev.type === "item.started" || ev.type === "item.completed") && ev.item) {
       const id = ev.item.id ?? `item-${order.length}`;
       if (!items.has(id)) order.push(id);
-      items.set(id, { ...items.get(id), ...ev.item, id });
+      const existing = items.get(id);
+      items.set(id, {
+        item: { ...existing?.item, ...ev.item, id },
+        ...(ev.type === "item.started" && eventMs !== undefined ? { startMs: eventMs } : existing?.startMs === undefined ? {} : { startMs: existing.startMs }),
+        ...(ev.type === "item.completed" && eventMs !== undefined ? { endMs: eventMs } : existing?.endMs === undefined ? {} : { endMs: existing.endMs }),
+      });
     }
   }
 
   const rootId = threadId ?? "codex-session";
   const llmCalls = order.reduce(
-    (count, id) => count + (items.get(id)?.type === "agent_message" ? 1 : 0),
+    (count, id) => count + (items.get(id)?.item.type === "agent_message" ? 1 : 0),
     0,
   );
+  const rootStart = observedTimes.length > 0 ? Math.min(...observedTimes) : 0;
+  const rootEnd = observedTimes.length > 0 ? Math.max(...observedTimes) : rootStart;
   const out: LooseSpan[] = [
     {
       span_id: rootId,
       parent_span_id: null,
       name: "codex.session",
       status_code: turnFailed ? "ERROR" : "OK",
-      start_time: 0,
-      end_time: order.length,
+      start_time: rootStart,
+      end_time: rootEnd,
       attributes: {
         "openinference.span.kind": "AGENT",
         "tracelens.llm.calls": llmCalls,
@@ -81,8 +93,9 @@ function execToLooseSpans(events: CodexEvent[]): LooseSpan[] {
     },
   ];
 
-  order.forEach((id, j) => {
-    const item = items.get(id)!;
+  order.forEach((id) => {
+    const entry = items.get(id)!;
+    const item = entry.item;
     const kind = item.type ? KIND_BY_ITEM[item.type] : undefined;
     const input = item.command ?? item.query;
     const output = item.text ?? item.aggregated_output ?? item.output;
@@ -92,8 +105,8 @@ function execToLooseSpans(events: CodexEvent[]): LooseSpan[] {
       parent_span_id: rootId,
       name: item.type ?? "item",
       status_code: isError ? "ERROR" : "OK",
-      start_time: j,
-      end_time: j,
+      start_time: entry.startMs ?? entry.endMs ?? 0,
+      end_time: entry.endMs ?? entry.startMs ?? 0,
       attributes: {
         ...(kind ? { "openinference.span.kind": kind } : {}),
         ...(input !== undefined ? { "input.value": input } : {}),
@@ -104,6 +117,17 @@ function execToLooseSpans(events: CodexEvent[]): LooseSpan[] {
   });
 
   return out;
+}
+
+function execTimestampMs(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return undefined;
 }
 
 /* ── Codex session rollout (saved ~/.codex/sessions/.../rollout-*.jsonl) ── */

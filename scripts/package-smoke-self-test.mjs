@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { OwnedProcessRegistry, removeVerifiedSystemTempRoot, runCommand, withHardTimeout } from "./process-control.mjs";
-import { resolveInstalledBinShim } from "./package-shim.mjs";
+import { installedShimInvocation, resolveInstalledBinShim } from "./package-shim.mjs";
 import { OwnedStdioClientTransport } from "./owned-stdio-transport.mjs";
 
 const TEMP_PREFIX = "tracelens-package-smoke-self-test-";
@@ -23,12 +23,11 @@ async function writeFixtureInstallation(temporaryRoot) {
   await chmod(entry, 0o755);
 
   if (process.platform === "win32") {
-    const shim = path.join(binDirectory, "tracelens.ps1");
+    const shim = path.join(binDirectory, "tracelens.cmd");
     await writeFile(shim, [
-      "#!/usr/bin/env pwsh",
-      "$basedir=Split-Path $MyInvocation.MyCommand.Definition -Parent",
-      "& \"node.exe\" \"$basedir/../tracelens/dist-cli/index.js\" $args",
-      "exit $LASTEXITCODE",
+      "@ECHO off",
+      "SET dp0=%~dp0",
+      "\"node.exe\" \"%dp0%\\..\\tracelens\\dist-cli\\index.js\" %*",
       "",
     ].join("\n"), "utf8");
   } else {
@@ -40,7 +39,7 @@ async function writeFixtureInstallation(temporaryRoot) {
 async function assertLocalShimOnly(temporaryRoot) {
   const { installDirectory } = await writeFixtureInstallation(temporaryRoot);
   const binDirectory = path.join(installDirectory, "node_modules", ".bin");
-  const shimName = process.platform === "win32" ? "tracelens.ps1" : "tracelens";
+  const shimName = process.platform === "win32" ? "tracelens.cmd" : "tracelens";
   const shimPath = path.join(binDirectory, shimName);
 
   const missingDirectory = path.join(temporaryRoot, "missing");
@@ -54,8 +53,9 @@ async function assertLocalShimOnly(temporaryRoot) {
 
   if (process.platform === "win32") {
     await writeFile(shimPath, [
-      "# $basedir/../tracelens/dist-cli/index.js",
-      "& \"node.exe\" \"$basedir/../other/cli.js\" $args",
+      "@ECHO off",
+      "SET dp0=%~dp0",
+      "\"node.exe\" \"%dp0%\\..\\other\\cli.js\" %*",
       "",
     ].join("\n"), "utf8");
   } else {
@@ -74,16 +74,27 @@ async function assertLocalShimOnly(temporaryRoot) {
   const invocation = await resolveInstalledBinShim(fixture.installDirectory);
   assert.equal(invocation.environment.npm_config_offline, "true", "Installed shim execution must explicitly disable registry access.");
   if (process.platform === "win32") {
-    assert.equal(invocation.args.at(-1), invocation.shimPath, "PowerShell must receive the exact local shim path as a literal argument.");
+    assert.equal(invocation.environment.TRACELENS_VERIFIED_SHIM, `"${invocation.shimPath}"`, "The command host must receive the quoted exact verified local shim path without recursive percent expansion.");
   } else {
     assert.equal(invocation.command, invocation.shimPath, "POSIX must execute the exact local shim path.");
   }
   assert(!invocation.args.includes("exec"), "Installed shim execution must not delegate to npm exec.");
+  const mcpInvocation = installedShimInvocation(invocation, "mcp", { HOME: temporaryRoot });
+  assert.equal(mcpInvocation.command, invocation.command, "MCP must launch through the exact verified shim command.");
+  if (process.platform === "win32") {
+    assert.deepEqual(mcpInvocation.args, [...invocation.args, "%TRACELENS_VERIFIED_SHIM% mcp"], "MCP must invoke the exact verified command shim with one fixed subcommand.");
+  } else {
+    assert.deepEqual(mcpInvocation.args, [...invocation.args, "mcp"], "MCP must append its subcommand to the exact verified shim arguments.");
+  }
+  assert.equal(mcpInvocation.shell, false, "MCP shim launch must keep shell expansion disabled.");
+  assert.equal(mcpInvocation.env.npm_config_offline, "true", "MCP shim launch must retain offline package resolution.");
+  assert.equal(mcpInvocation.env.HOME, temporaryRoot, "MCP shim launch must apply isolated environment overrides.");
   const registry = new OwnedProcessRegistry();
   try {
-    const result = await runCommand(invocation.command, [...invocation.args, "--help"], {
+    const helpInvocation = installedShimInvocation(invocation, "--help");
+    const result = await runCommand(helpInvocation.command, helpInvocation.args, {
       cwd: temporaryRoot,
-      env: invocation.environment,
+      env: helpInvocation.env,
       registry,
       timeoutMs: 3_000,
     });

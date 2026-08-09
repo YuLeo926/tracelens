@@ -3,7 +3,7 @@ import path from "node:path";
 import { parseTraceText } from "../src/core/parse";
 import { buildRunFacts } from "../src/core/session/facts";
 import { createSessionQuery, type SessionQuery } from "../src/core/session/query";
-import { clipText, redactText } from "../src/core/session/sanitize";
+import { clipText } from "../src/core/session/sanitize";
 import { inspectSessionSource } from "../src/core/session/source";
 import type {
   ProjectMatch,
@@ -128,6 +128,33 @@ async function readStableSnapshot(filePath: string, fileSystem: RepositoryFileSy
   return { ...latest!, unstable: true };
 }
 
+function activeJsonlParseSource(text: string): string {
+  if (/\r?\n$/.test(text)) return text;
+  const finalNewline = text.lastIndexOf("\n");
+  if (finalNewline < 0) return text;
+  const tail = text.slice(finalNewline + 1).trim();
+  if (!tail) return text;
+  try {
+    JSON.parse(tail);
+    return text;
+  } catch {
+    // Only an unterminated malformed final record is recoverable.
+  }
+
+  let parsedRecords = 0;
+  for (const line of text.slice(0, finalNewline + 1).split(/\r?\n/)) {
+    const candidate = line.trim();
+    if (!candidate) continue;
+    try {
+      JSON.parse(candidate);
+      parsedRecords += 1;
+    } catch {
+      return text;
+    }
+  }
+  return parsedRecords > 0 ? text.slice(0, finalNewline + 1) : text;
+}
+
 export async function createSessionRepository(
   options: RepositoryOptions,
   fileSystem: RepositoryFileSystem = fs,
@@ -177,7 +204,9 @@ export async function createSessionRepository(
     };
 
     try {
-      const source = redactText(snapshot.text);
+      const source = options.explicitFile === undefined && lifecycle === "active" && /\.jsonl$/i.test(candidate.path)
+        ? activeJsonlParseSource(snapshot.text)
+        : snapshot.text;
       const trace = parseTraceText(source);
       const facts = buildRunFacts(trace, lifecycle);
       const loaded: LoadedSession = {
@@ -207,10 +236,11 @@ export async function createSessionRepository(
         : candidates.filter((candidate) => candidate.provider === args.provider);
       const projectCandidates = providerCandidates.filter((candidate) => candidate.match !== "fallback");
       const isCurrentProjectFallback = scope === "current_project" && projectCandidates.length === 0;
-      const selected = (scope === "current_project" && !isCurrentProjectFallback ? projectCandidates : providerCandidates)
-        .slice(0, cappedLimit(args.limit));
+      const selected = scope === "current_project" && !isCurrentProjectFallback ? projectCandidates : providerCandidates;
+      const limit = cappedLimit(args.limit);
       const summaries: SessionSummary[] = [];
       for (const candidate of selected) {
+        if (summaries.length >= limit) break;
         try {
           const loaded = await loadCandidate(candidate);
           summaries.push({

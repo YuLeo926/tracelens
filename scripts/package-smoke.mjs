@@ -11,7 +11,7 @@ import {
   withHardTimeout,
 } from "./process-control.mjs";
 import { OwnedStdioClientTransport } from "./owned-stdio-transport.mjs";
-import { resolveInstalledBinShim } from "./package-shim.mjs";
+import { installedShimInvocation, resolveInstalledBinShim } from "./package-shim.mjs";
 import { runProcessControlSelfTest } from "./process-control-self-test.mjs";
 import { runPackageSmokeSelfTest } from "./package-smoke-self-test.mjs";
 
@@ -140,28 +140,27 @@ async function main() {
     console.log("Installed the generated tarball with lifecycle scripts disabled.");
 
     const shim = await resolveInstalledBinShim(installDirectory);
-    const help = await run(shim.command, [...shim.args, "--help"], {
+    const helpInvocation = installedShimInvocation(shim, "--help");
+    const help = await run(helpInvocation.command, helpInvocation.args, {
       cwd: projectDirectory,
-      env: shim.environment,
+      env: helpInvocation.env,
     });
     for (const command of ["open", "list", "mcp", "setup codex"]) {
       assert(help.stdout.includes(command), `Installed CLI help is missing ${command}.`);
     }
     console.log("Verified the installed npm bin shim and CLI help.");
 
-    const environment = Object.fromEntries(
+    const environmentOverrides = Object.fromEntries(
       Object.entries({
-        ...process.env,
         HOME: homeDirectory,
         USERPROFILE: homeDirectory,
         CODEX_HOME: codexHome,
       }).filter((entry) => typeof entry[1] === "string"),
     );
+    const mcpInvocation = installedShimInvocation(shim, "mcp", environmentOverrides);
     transport = new OwnedStdioClientTransport({
-      command: process.execPath,
-      args: [shim.installedEntry, "mcp"],
+      ...mcpInvocation,
       cwd: projectDirectory,
-      env: environment,
       stderr: "pipe",
     }, ownedProcesses, { label: "installed MCP child" });
     const stderrStream = transport.stderr;

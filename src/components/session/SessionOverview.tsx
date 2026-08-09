@@ -39,7 +39,7 @@ export function sessionFactRows(session: SessionSummary): FactRow[] {
   rows.push(
     ...facts.errorEvents.map((event) => ({ id: `error-${event.eventId}`, label: `Error event: ${sessionDisplayText(event.name)}`, value: formatDuration(event.durationMs), eventId: event.eventId })),
     ...facts.slowestEvents.map((event) => ({ id: `slowest-${event.eventId}`, label: `Slowest event: ${sessionDisplayText(event.name)}`, value: formatDuration(event.durationMs), eventId: event.eventId })),
-    ...facts.highestTokenEvents.map((event) => ({ id: `tokens-${event.eventId}`, label: `Highest-token event: ${sessionDisplayText(event.name)}`, value: `${formatTokens(event.tokensIn)} in / ${formatTokens(event.tokensOut)} out`, eventId: event.eventId })),
+    ...facts.highestTokenEvents.map((event) => ({ id: `tokens-${event.eventId}`, label: `Highest-token event: ${sessionDisplayText(event.name)}`, value: `${formatTokens(event.tokensIn)} in / ${formatTokens(event.tokensOut)} out${event.tokenSharePercent === undefined ? "" : ` (${event.tokenSharePercent}%)`}`, eventId: event.eventId })),
     ...facts.repeatedOperations.map((operation) => ({
       id: `repeated-${operation.eventIds[0] ?? operation.operationName}`,
       label: `Repeated operation: ${sessionDisplayText(operation.operationName)}`,

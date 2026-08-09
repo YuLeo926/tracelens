@@ -3,6 +3,10 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parseTrace, parseTraceText } from "../src/core/parse";
+import { buildRunFacts } from "../src/core/session/facts";
+import { publicEventId } from "../src/core/session/publicIds";
+import type { SessionSummary } from "../src/core/session/types";
 import { createViewerService } from "./server";
 import type { SessionRepository } from "./repository";
 
@@ -23,12 +27,34 @@ async function createWebRoot(): Promise<string> {
   return root;
 }
 
-function repository(): SessionRepository {
+function repository(eventId = "event-1"): SessionRepository {
+  const trace = parseTrace([{
+    span_id: eventId,
+    trace_id: "trace-1",
+    name: "Trace event",
+    start_time: 1,
+    end_time: 2,
+    status_code: "OK",
+    attributes: { "openinference.span.kind": "TOOL" },
+  }]);
+  const summary: SessionSummary = {
+    id: "session-1",
+    provider: "codex",
+    title: "Trace",
+    modifiedAt: 1,
+    sizeBytes: 1,
+    lifecycle: "complete",
+    match: "exact",
+    selectionReason: "Matches current project.",
+    facts: buildRunFacts(trace, "complete"),
+  };
   return {
-    list: vi.fn().mockResolvedValue([{ id: "session-1", title: "Trace" }]),
+    list: vi.fn().mockResolvedValue([summary]),
     load: vi.fn().mockResolvedValue({
-      summary: { id: "session-1", title: "Trace" },
-      source: '{"spans":[]}',
+      summary,
+      trace,
+      facts: summary.facts,
+      source: "raw source",
     }),
     refresh: vi.fn().mockResolvedValue(undefined),
   } as unknown as SessionRepository;
@@ -39,10 +65,10 @@ function serverOrigin(link: string): string {
   return url.origin;
 }
 
-function get(origin: string, requestPath: string, headers: Record<string, string> = {}): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+function get(origin: string, requestPath: string, headers: Record<string, string> = {}, method = "GET"): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
   const url = new URL(origin);
   return new Promise((resolve, reject) => {
-    const req = request({ host: url.hostname, port: url.port, path: requestPath, headers }, (res) => {
+    const req = request({ host: url.hostname, port: url.port, path: requestPath, headers, method }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk: Buffer) => chunks.push(chunk));
       res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
@@ -84,18 +110,20 @@ describe("createViewerService", () => {
     expect(listed.status).toBe(200);
     expect(listed.headers["cache-control"]).toBe("no-store");
     expect(listed.headers["access-control-allow-origin"]).toBeUndefined();
-    expect(JSON.parse(listed.body)).toEqual([{ id: "session-1", title: "Trace" }]);
+    expect(JSON.parse(listed.body)).toMatchObject([{ id: "session-1", title: "Trace" }]);
 
     const loaded = await get(serverOrigin(first), "/api/sessions/session-1", authHeaders());
     expect(loaded.status).toBe(200);
-    expect(JSON.parse(loaded.body)).toEqual({ session: { id: "session-1", title: "Trace" }, source: '{"spans":[]}' });
+    const payload = JSON.parse(loaded.body);
+    expect(payload.session).toMatchObject({ id: "session-1", title: "Trace" });
+    expect(parseTraceText(payload.source).byId.has(publicEventId("session-1", "event-1"))).toBe(true);
     await service.close();
   });
 
   it("resolves a session-scoped opaque event alias without exposing the raw event in the link", async () => {
     const rawEventId = "C:\\private\\traces\\event.json";
     const eventAlias = `evt_${"c".repeat(64)}`;
-    const service = createViewerService({ repository: repository(), webRoot: await createWebRoot(), token });
+    const service = createViewerService({ repository: repository(rawEventId), webRoot: await createWebRoot(), token });
     const link = await service.getLink("session-1", rawEventId, eventAlias);
     const url = new URL(link);
 
@@ -108,21 +136,73 @@ describe("createViewerService", () => {
       authHeaders(),
     );
     expect(loaded.status).toBe(200);
-    expect(JSON.parse(loaded.body)).toEqual({
-      session: { id: "session-1", title: "Trace" },
-      source: '{"spans":[]}',
-      selectedEventId: rawEventId,
-    });
+    const payload = JSON.parse(loaded.body);
+    expect(payload.session).toMatchObject({ id: "session-1", title: "Trace" });
+    expect(payload.selectedEventId).toBe(publicEventId("session-1", rawEventId));
+    expect(parseTraceText(payload.source).byId.has(payload.selectedEventId)).toBe(true);
 
     const otherSession = await get(
       url.origin,
       `/api/sessions/session-2?event=${encodeURIComponent(eventAlias)}`,
       authHeaders(),
     );
-    expect(JSON.parse(otherSession.body)).toEqual({
-      session: { id: "session-1", title: "Trace" },
-      source: '{"spans":[]}',
+    expect(JSON.parse(otherSession.body)).not.toHaveProperty("selectedEventId");
+    await service.close();
+  });
+
+  it("sanitizes raw repository evidence at every browser API success boundary", async () => {
+    const privatePath = "C:\\private\\trace.jsonl";
+    const otherPrivatePath = "/var/private/trace.jsonl";
+    const trace = parseTrace([privatePath, otherPrivatePath].map((spanId, index) => ({
+      span_id: spanId,
+      trace_id: "trace",
+      name: `Inspect ${spanId}`,
+      start_time: index,
+      end_time: index + 1,
+      status_code: "ERROR",
+      attributes: { "openinference.span.kind": "TOOL", "input.value": spanId },
+    })));
+    const facts = buildRunFacts(trace, "complete");
+    const summary: SessionSummary = {
+      id: "session-1",
+      provider: "codex",
+      title: `Inspect ${privatePath}`,
+      modifiedAt: 1,
+      sizeBytes: 1,
+      lifecycle: "complete",
+      match: "exact",
+      selectionReason: "Matches current project.",
+      facts,
+    };
+    const rawRepository = repository();
+    rawRepository.list = vi.fn().mockResolvedValue([summary]);
+    rawRepository.load = vi.fn().mockResolvedValue({
+      summary,
+      trace,
+      facts,
+      source: "raw source",
     });
+    const service = createViewerService({ repository: rawRepository, webRoot: await createWebRoot(), token });
+    const eventAlias = `evt_${"a".repeat(64)}`;
+    const origin = serverOrigin(await service.getLink("session-1", privatePath, eventAlias));
+
+    const listed = await get(origin, "/api/sessions", authHeaders());
+    const loaded = await get(origin, "/api/sessions/session-1", authHeaders());
+
+    expect(listed.body).not.toContain(privatePath);
+    expect(loaded.body).not.toContain(privatePath);
+    expect(listed.body).not.toContain(otherPrivatePath);
+    expect(loaded.body).not.toContain(otherPrivatePath);
+    expect(listed.body).toContain("<absolute-path>");
+    expect(loaded.body).toContain("<absolute-path>");
+    const payload = JSON.parse(loaded.body);
+    const publicTrace = parseTraceText(payload.source);
+    expect([...publicTrace.byId.keys()]).toEqual([
+      publicEventId("session-1", privatePath),
+      publicEventId("session-1", otherPrivatePath),
+    ]);
+    expect(new Set(publicTrace.byId.keys()).size).toBe(2);
+    expect(payload.session.facts.errorEvents.map((event: { eventId: string }) => event.eventId)).toEqual([...publicTrace.byId.keys()]);
     await service.close();
   });
 
@@ -134,7 +214,12 @@ describe("createViewerService", () => {
     const service = createViewerService({ repository: repository(), webRoot: root, token });
     const origin = serverOrigin(await service.getLink("session-1"));
 
-    await expect(get(origin, "/api/unknown", authHeaders())).resolves.toMatchObject({ status: 404 });
+    const unknownApi = await get(origin, "/api/unknown", authHeaders());
+    expect(unknownApi).toMatchObject({ status: 404 });
+    expect(unknownApi.headers["cache-control"]).toBe("no-store");
+    const unsupportedMethod = await get(origin, "/api/sessions", authHeaders(), "POST");
+    expect(unsupportedMethod).toMatchObject({ status: 404 });
+    expect(unsupportedMethod.headers["cache-control"]).toBe("no-store");
     await expect(get(origin, "/tracelens/assets/app.js")).resolves.toMatchObject({ status: 200, body: "console.log('viewer');" });
     await expect(get(origin, "/tracelens/%2e%2e/%2e%2e/secret.txt")).resolves.toMatchObject({ status: 404 });
     await expect(get(origin, "/tracelens/assets/escape/secret.txt")).resolves.toMatchObject({ status: 404 });

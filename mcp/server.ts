@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import type { SessionRepository } from "../cli/repository";
 import type { ViewerService } from "../cli/server";
+import { redactText } from "../src/core/session/sanitize";
 import {
   createTraceLensHandlers,
   TraceLensPublicError,
@@ -37,7 +38,15 @@ export interface McpStdioRuntime {
 }
 
 function toolResponse<T>(value: TraceLensToolResult<T>): ToolResponse {
-  const structuredContent = value as unknown as Record<string, unknown>;
+  const sanitize = (candidate: unknown): unknown => {
+    if (typeof candidate === "string") return redactText(candidate);
+    if (Array.isArray(candidate)) return candidate.map(sanitize);
+    if (candidate && typeof candidate === "object") {
+      return Object.fromEntries(Object.entries(candidate).map(([key, nested]) => [redactText(key), sanitize(nested)]));
+    }
+    return candidate;
+  };
+  const structuredContent = sanitize(value) as Record<string, unknown>;
   return { content: [{ type: "text", text: JSON.stringify(structuredContent) }], structuredContent };
 }
 
@@ -58,6 +67,10 @@ function eventIdSchema() {
   return z.string().regex(OPAQUE_EVENT_ID);
 }
 
+function cursorSchema() {
+  return z.string().regex(CURSOR).refine((value) => Number.isSafeInteger(Number(value)), "Cursor exceeds supported range.");
+}
+
 export function registerMcpTools(server: McpToolRegistrar, handlers: TraceLensHandlers): void {
   server.registerTool(
     "list_sessions",
@@ -71,12 +84,12 @@ export function registerMcpTools(server: McpToolRegistrar, handlers: TraceLensHa
   );
   server.registerTool(
     "get_session_timeline",
-    { description: TOOL_DESCRIPTION, inputSchema: z.object({ sessionId: sessionIdSchema(), cursor: z.string().regex(CURSOR).optional(), limit: z.number().int().min(1).max(50).optional(), kinds: z.array(z.enum(SPAN_KINDS)).optional(), status: z.enum(SPAN_STATUSES).optional() }).strict() },
+    { description: TOOL_DESCRIPTION, inputSchema: z.object({ sessionId: sessionIdSchema(), cursor: cursorSchema().optional(), limit: z.number().int().min(1).max(50).optional(), kinds: z.array(z.enum(SPAN_KINDS)).optional(), status: z.enum(SPAN_STATUSES).optional() }).strict() },
     async (args) => callTool(() => handlers.getSessionTimeline(args as Parameters<TraceLensHandlers["getSessionTimeline"]>[0])),
   );
   server.registerTool(
     "search_session",
-    { description: TOOL_DESCRIPTION, inputSchema: z.object({ sessionId: sessionIdSchema(), query: z.string().min(1), cursor: z.string().regex(CURSOR).optional(), limit: z.number().int().min(1).max(20).optional() }).strict() },
+    { description: TOOL_DESCRIPTION, inputSchema: z.object({ sessionId: sessionIdSchema(), query: z.string().min(1), cursor: cursorSchema().optional(), limit: z.number().int().min(1).max(20).optional() }).strict() },
     async (args) => callTool(() => handlers.searchSession(args as Parameters<TraceLensHandlers["searchSession"]>[0])),
   );
   server.registerTool(

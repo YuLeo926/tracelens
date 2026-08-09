@@ -47,6 +47,30 @@ describe("Codex end-to-end via parseTrace", () => {
     const agent = flatten(t.roots).find((n) => n.name === "agent_message")!;
     expect(agent.kind).toBe("llm");
   });
+
+  it("does not fabricate durations for untimestamped exec events", () => {
+    expect(t.summary.durationMs).toBe(0);
+    expect(flatten(t.roots).every((node) => node.durationMs === 0)).toBe(true);
+  });
+});
+
+const TIMESTAMPED_EXEC = [
+  { type: "thread.started", thread_id: "thread-timed", timestamp: "2026-07-31T10:00:00.000Z" },
+  { type: "turn.started", timestamp: "2026-07-31T10:00:01.000Z" },
+  { type: "item.started", timestamp: "2026-07-31T10:00:02.000Z", item: { id: "item-timed", type: "command_execution", command: "npm test", status: "in_progress" } },
+  { type: "item.completed", timestamp: "2026-07-31T10:00:04.500Z", item: { id: "item-timed", type: "command_execution", command: "npm test", status: "completed", aggregated_output: "passed" } },
+  { type: "turn.completed", timestamp: "2026-07-31T10:00:05.000Z", usage: { input_tokens: 10, output_tokens: 2 } },
+];
+
+describe("Codex exec timestamps", () => {
+  it("uses real event timestamps for root and item durations", () => {
+    const trace = parseTrace(TIMESTAMPED_EXEC);
+
+    expect(trace.roots[0].startMs).toBe(Date.parse("2026-07-31T10:00:00.000Z"));
+    expect(trace.roots[0].durationMs).toBe(5_000);
+    expect(trace.byId.get("item-timed")!.startMs).toBe(Date.parse("2026-07-31T10:00:02.000Z"));
+    expect(trace.byId.get("item-timed")!.durationMs).toBe(2_500);
+  });
 });
 
 const ROLLOUT = [

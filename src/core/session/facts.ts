@@ -1,8 +1,10 @@
 import type { ParsedTrace, RunNode } from "../types";
-import { redactText } from "./sanitize";
+import { clipText } from "./sanitize";
 import type { EventRef, RepeatedOperationFact, RunFacts, SessionLifecycle } from "./types";
 
 export const FACT_LIST_LIMIT = 10;
+export const FACT_NAME_CHARS = 120;
+export const REPEATED_EVENT_ID_LIMIT = 10;
 
 function flattenChronologically(trace: ParsedTrace): RunNode[] {
   return [...trace.byId.values()].sort((a, b) => a.startMs - b.startMs || a.spanId.localeCompare(b.spanId));
@@ -34,16 +36,21 @@ export function canonicalOperationKey(node: RunNode): string {
   return JSON.stringify([node.name, canonicalInput(node.input)]);
 }
 
-function eventRef(node: RunNode): EventRef {
+function factName(value: string): string {
+  return clipText(value, FACT_NAME_CHARS).text;
+}
+
+function eventRef(node: RunNode, tokenSharePercent?: number): EventRef {
   return {
     eventId: node.spanId,
-    name: redactText(node.name),
+    name: factName(node.name),
     kind: node.kind,
     status: node.status,
     startMs: node.startMs,
     durationMs: node.durationMs,
     ...(node.tokensIn === undefined ? {} : { tokensIn: node.tokensIn }),
     ...(node.tokensOut === undefined ? {} : { tokensOut: node.tokensOut }),
+    ...(tokenSharePercent === undefined ? {} : { tokenSharePercent }),
   };
 }
 
@@ -60,7 +67,7 @@ export function buildRunFacts(trace: ParsedTrace, lifecycle: SessionLifecycle): 
     const key = canonicalOperationKey(node);
     const group = operationGroups.get(key);
     if (group) group.nodes.push(node);
-    else operationGroups.set(key, { operationName: redactText(node.name), nodes: [node] });
+    else operationGroups.set(key, { operationName: factName(node.name), nodes: [node] });
   }
 
   const repeatedOperations: RepeatedOperationFact[] = [...operationGroups.values()]
@@ -69,12 +76,23 @@ export function buildRunFacts(trace: ParsedTrace, lifecycle: SessionLifecycle): 
       operationName,
       count: nodes.length,
       failureCount: nodes.filter((node) => node.status === "error").length,
-      eventIds: nodes.map((node) => node.spanId),
+      eventIds: nodes.slice(0, REPEATED_EVENT_ID_LIMIT).map((node) => node.spanId),
+      eventIdsOmitted: Math.max(0, nodes.length - REPEATED_EVENT_ID_LIMIT),
     }))
     .sort((left, right) => left.eventIds[0].localeCompare(right.eventIds[0]))
     .slice(0, FACT_LIST_LIMIT);
 
   const totalCostUsd = trace.summary.totalCostUsd;
+  const sessionTokens = trace.summary.totalTokensIn + trace.summary.totalTokensOut;
+  const highestTokenEvents = [...events]
+    .filter((node) => (node.tokensIn ?? 0) + (node.tokensOut ?? 0) > 0)
+    .sort(byTokens)
+    .slice(0, FACT_LIST_LIMIT)
+    .map((node) => {
+      const eventTokens = (node.tokensIn ?? 0) + (node.tokensOut ?? 0);
+      const share = sessionTokens > 0 ? (eventTokens / sessionTokens) * 100 : 0;
+      return eventRef(node, Math.min(100, Math.max(0, Math.round(share * 10) / 10)));
+    });
   return {
     lifecycle,
     totals: {
@@ -86,8 +104,8 @@ export function buildRunFacts(trace: ParsedTrace, lifecycle: SessionLifecycle): 
       errors: trace.summary.errors,
     },
     errorEvents: events.filter((node) => node.status === "error").sort(byStart).slice(0, FACT_LIST_LIMIT).map(eventRef),
-    slowestEvents: [...events].sort(byDuration).slice(0, FACT_LIST_LIMIT).map(eventRef),
-    highestTokenEvents: [...events].sort(byTokens).slice(0, FACT_LIST_LIMIT).map(eventRef),
+    slowestEvents: [...events].filter((node) => node.durationMs > 0).sort(byDuration).slice(0, FACT_LIST_LIMIT).map((node) => eventRef(node)),
+    highestTokenEvents,
     repeatedOperations,
   };
 }

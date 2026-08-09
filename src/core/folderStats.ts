@@ -189,26 +189,28 @@ const PRICES: Array<PriceRate & { match: RegExp }> = [
 const FALLBACK = { inUsd: 2, cachedUsd: 0.2, outUsd: 10 };
 const SONNET_5_STANDARD_START_MS = Date.parse("2026-09-01T00:00:00.000Z");
 
-function rateForModel(model: string | undefined, atMs: number): PriceRate {
-  if (model && /claude.*sonnet.*5/i.test(model)) {
+function knownRateForModel(model: string | undefined, atMs: number): PriceRate | undefined {
+  if (!model) return undefined;
+  if (/claude.*sonnet.*5/i.test(model)) {
     return atMs < SONNET_5_STANDARD_START_MS
       ? { inUsd: 2, cachedUsd: 0.2, outUsd: 10, cacheWrite5mUsd: 2.5, cacheWrite1hUsd: 4 }
       : { inUsd: 3, cachedUsd: 0.3, outUsd: 15, cacheWrite5mUsd: 3.75, cacheWrite1hUsd: 6 };
   }
-  return (model && PRICES.find((p) => p.match.test(model))) || FALLBACK;
+  return PRICES.find((price) => price.match.test(model));
 }
 
-/** Estimate cost, pricing the cached input subset ~10x cheaper than fresh input. */
-export function estimateCostUsd(
+function rateForModel(model: string | undefined, atMs: number): PriceRate {
+  return knownRateForModel(model, atMs) ?? FALLBACK;
+}
+
+function estimateWithRate(
+  rate: PriceRate,
   tokensIn: number,
   tokensOut: number,
   cachedIn: number,
-  model?: string,
-  cacheWriteIn = 0,
-  cacheWrite1hIn = 0,
-  atMs = Date.now(),
+  cacheWriteIn: number,
+  cacheWrite1hIn: number,
 ): number {
-  const rate = rateForModel(model, atMs);
   const totalIn = Math.max(0, tokensIn);
   const cacheRead = Math.min(Math.max(0, cachedIn), totalIn);
   const cacheWrite = Math.min(Math.max(0, cacheWriteIn), Math.max(0, totalIn - cacheRead));
@@ -224,6 +226,36 @@ export function estimateCostUsd(
     (cacheWrite1h / 1e6) * cacheWrite1hUsd +
     (Math.max(0, tokensOut) / 1e6) * rate.outUsd
   );
+}
+
+/** Estimate cost, pricing the cached input subset ~10x cheaper than fresh input. */
+export function estimateCostUsd(
+  tokensIn: number,
+  tokensOut: number,
+  cachedIn: number,
+  model?: string,
+  cacheWriteIn = 0,
+  cacheWrite1hIn = 0,
+  atMs = Date.now(),
+): number {
+  const rate = rateForModel(model, atMs);
+  return estimateWithRate(rate, tokensIn, tokensOut, cachedIn, cacheWriteIn, cacheWrite1hIn);
+}
+
+/** Estimate only when the supplied model matches an explicit pricing-table entry. */
+export function estimateKnownModelCostUsd(
+  tokensIn: number,
+  tokensOut: number,
+  cachedIn: number,
+  model: string | undefined,
+  cacheWriteIn = 0,
+  cacheWrite1hIn = 0,
+  atMs = Date.now(),
+): number | undefined {
+  const rate = knownRateForModel(model, atMs);
+  return rate === undefined
+    ? undefined
+    : estimateWithRate(rate, tokensIn, tokensOut, cachedIn, cacheWriteIn, cacheWrite1hIn);
 }
 
 function ymd(ms: number): string {

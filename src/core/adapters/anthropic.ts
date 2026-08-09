@@ -1,7 +1,19 @@
 import type { LooseSpan } from "../openinference";
+import { estimateKnownModelCostUsd } from "../folderStats";
 import type { TraceAdapter } from "./types";
 
 /* ── Anthropic Messages API log ──────────────────────────────────────── */
+
+interface AnthropicUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number;
+    ephemeral_1h_input_tokens?: number;
+  };
+}
 
 interface AnthropicMessage {
   id?: string;
@@ -9,7 +21,68 @@ interface AnthropicMessage {
   role?: string;
   model?: string;
   content?: unknown;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: AnthropicUsage;
+}
+
+interface UsageBreakdown {
+  freshInput: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheWrite1h: number;
+  output: number;
+  totalInput: number;
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function usageBreakdown(usage: AnthropicUsage | undefined): UsageBreakdown {
+  const freshInput = tokenCount(usage?.input_tokens);
+  const cacheRead = tokenCount(usage?.cache_read_input_tokens);
+  const cacheWrite5m = tokenCount(usage?.cache_creation?.ephemeral_5m_input_tokens);
+  const cacheWrite1hSubtype = tokenCount(usage?.cache_creation?.ephemeral_1h_input_tokens);
+  const cacheWrite = typeof usage?.cache_creation_input_tokens === "number" && Number.isFinite(usage.cache_creation_input_tokens)
+    ? tokenCount(usage.cache_creation_input_tokens)
+    : cacheWrite5m + cacheWrite1hSubtype;
+  const cacheWrite1h = Math.min(cacheWrite1hSubtype, cacheWrite);
+  const output = tokenCount(usage?.output_tokens);
+  return { freshInput, cacheRead, cacheWrite, cacheWrite1h, output, totalInput: freshInput + cacheRead + cacheWrite };
+}
+
+function timestampMs(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function usageAttributes(
+  usage: AnthropicUsage | undefined,
+  model: string | undefined,
+  atMs: number | undefined,
+): Record<string, number> {
+  if (usage === undefined) return {};
+  const totals = usageBreakdown(usage);
+  const cost = estimateKnownModelCostUsd(
+    totals.totalInput,
+    totals.output,
+    totals.cacheRead,
+    model,
+    totals.cacheWrite,
+    totals.cacheWrite1h,
+    atMs,
+  );
+  return {
+    "gen_ai.usage.input_tokens": totals.totalInput,
+    "gen_ai.usage.output_tokens": totals.output,
+    "gen_ai.usage.cache_read_input_tokens": totals.cacheRead,
+    "gen_ai.usage.cache_creation_input_tokens": totals.cacheWrite,
+    "gen_ai.usage.cache_creation_1h_input_tokens": totals.cacheWrite1h,
+    ...(cost === undefined ? {} : { "gen_ai.usage.cost": cost }),
+  };
 }
 interface LogEntry extends AnthropicMessage {
   request?: { model?: string; messages?: unknown; system?: unknown };
@@ -58,7 +131,8 @@ function messagesLogToLooseSpans(entries: LogEntry[]): LooseSpan[] {
     const output = isError
       ? JSON.stringify(el.error ?? response, null, 2)
       : textBlocks(response.content);
-    const time = el.timestamp ?? el.start_time ?? i;
+    const recordedTime = el.timestamp ?? el.start_time;
+    const time = recordedTime ?? i;
     return {
       span_id: el.id ?? response.id ?? `claude-${i}`,
       parent_span_id: null,
@@ -69,8 +143,7 @@ function messagesLogToLooseSpans(entries: LogEntry[]): LooseSpan[] {
       attributes: {
         "gen_ai.operation.name": "chat",
         "gen_ai.request.model": model,
-        "gen_ai.usage.input_tokens": usage?.input_tokens,
-        "gen_ai.usage.output_tokens": usage?.output_tokens,
+        ...usageAttributes(usage, model, timestampMs(recordedTime)),
         "input.value": input,
         "output.value": output,
       },
@@ -100,7 +173,7 @@ interface ClaudeLine {
     role?: string;
     content?: unknown;
     model?: string;
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: AnthropicUsage;
   };
 }
 
@@ -162,20 +235,23 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
   let assistantCalls = 0;
   let rootUsageIn = 0;
   let rootUsageOut = 0;
+  let rootCacheRead = 0;
+  let rootCacheWrite = 0;
+  let rootCacheWrite1h = 0;
+  let rootUsageCost = 0;
+  let rootHasUsageCost = false;
 
   lines.forEach((ln, i) => {
     if (ln.message?.role !== "assistant") return;
     assistantCalls += 1;
     const ts = ccTsToMs(ln.timestamp, i);
+    const pricingTs = timestampMs(ln.timestamp);
     const usage = ln.message?.usage;
     let usageAssigned = false;
     for (const b of blocksOf(ln.message?.content)) {
       if (b.type === "text" && typeof b.text === "string") {
         const usageAttrs = !usageAssigned
-          ? {
-              "gen_ai.usage.input_tokens": usage?.input_tokens,
-              "gen_ai.usage.output_tokens": usage?.output_tokens,
-            }
+          ? usageAttributes(usage, ln.message?.model, pricingTs)
           : {};
         usageAssigned = true;
         spans.push({
@@ -251,8 +327,18 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
       }
     }
     if (!usageAssigned) {
-      rootUsageIn += usage?.input_tokens ?? 0;
-      rootUsageOut += usage?.output_tokens ?? 0;
+      const totals = usageBreakdown(usage);
+      const attrs = usageAttributes(usage, ln.message?.model, pricingTs);
+      rootUsageIn += totals.totalInput;
+      rootUsageOut += totals.output;
+      rootCacheRead += totals.cacheRead;
+      rootCacheWrite += totals.cacheWrite;
+      rootCacheWrite1h += totals.cacheWrite1h;
+      const cost = attrs["gen_ai.usage.cost"];
+      if (cost !== undefined) {
+        rootUsageCost += cost;
+        rootHasUsageCost = true;
+      }
     }
   });
   spans.sort((a, b) => a.ts - b.ts);
@@ -271,6 +357,10 @@ function claudeCodeToLooseSpans(lines: ClaudeLine[]): LooseSpan[] {
       ...(firstPrompt !== undefined ? { "input.value": firstPrompt } : {}),
       ...(rootUsageIn > 0 ? { "gen_ai.usage.input_tokens": rootUsageIn } : {}),
       ...(rootUsageOut > 0 ? { "gen_ai.usage.output_tokens": rootUsageOut } : {}),
+      ...(rootCacheRead > 0 ? { "gen_ai.usage.cache_read_input_tokens": rootCacheRead } : {}),
+      ...(rootCacheWrite > 0 ? { "gen_ai.usage.cache_creation_input_tokens": rootCacheWrite } : {}),
+      ...(rootCacheWrite1h > 0 ? { "gen_ai.usage.cache_creation_1h_input_tokens": rootCacheWrite1h } : {}),
+      ...(rootHasUsageCost ? { "gen_ai.usage.cost": rootUsageCost } : {}),
     },
   };
   return [root, ...spans.map((s) => s.span)];

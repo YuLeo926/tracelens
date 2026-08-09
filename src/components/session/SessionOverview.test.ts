@@ -30,7 +30,7 @@ function session(): SessionSummary {
       ],
       highestTokenEvents: [],
       repeatedOperations: [
-        { operationName: "search_code", count: 3, failureCount: 1, eventIds: ["repeat-1", "repeat-2", "repeat-3"] },
+        { operationName: "search_code", count: 3, failureCount: 1, eventIds: ["repeat-1", "repeat-2", "repeat-3"], eventIdsOmitted: 0 },
       ],
     },
   };
@@ -48,6 +48,26 @@ describe("sessionFactRows", () => {
       expect.objectContaining({ label: "Slowest event: read_file", value: "2.00s", eventId: "slow-1" }),
       expect.objectContaining({ label: "Repeated operation: search_code", value: "3 calls, 1 error", eventId: "repeat-1" }),
     ]));
+  });
+
+  it("shows token share for non-zero highest-token events", () => {
+    const input = session();
+    input.facts.highestTokenEvents = [{
+      eventId: "tokens-1",
+      name: "assistant",
+      kind: "llm",
+      status: "ok",
+      startMs: 3,
+      durationMs: 1,
+      tokensIn: 900,
+      tokensOut: 100,
+      tokenSharePercent: 64.9,
+    }];
+
+    expect(sessionFactRows(input)).toContainEqual(expect.objectContaining({
+      label: "Highest-token event: assistant",
+      value: "900 in / 100 out (64.9%)",
+    }));
   });
 
   it("does not expose diagnostic language, paths, or raw event contents", () => {

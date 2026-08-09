@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import { appendFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -61,21 +61,26 @@ describe("createSessionRepository", () => {
     expect(summaries.every((summary) => summary.selectionReason === "No current-project sessions found; showing newest available session.")).toBe(true);
   });
 
-  it("skips malformed runs after lightweight discovery", async () => {
+  it("backfills the requested limit when a newer discovered run is malformed", async () => {
     const home = await makeHome();
     const cwd = path.join(home, "work", "tracelens");
-    await writeCodexSession(path.join(home, ".codex", "sessions", "valid.jsonl"), cwd, "Valid run");
+    const valid = path.join(home, ".codex", "sessions", "valid.jsonl");
+    await writeCodexSession(valid, cwd, "Valid run");
     const malformed = path.join(home, ".codex", "sessions", "malformed.jsonl");
     await writeCodexSession(malformed, cwd, "Malformed run");
     await appendFile(malformed, "{ malformed json\n");
+    const older = new Date("2026-07-31T10:00:00.000Z");
+    const newer = new Date("2026-07-31T11:00:00.000Z");
+    await utimes(valid, older, older);
+    await utimes(malformed, newer, newer);
 
     const repository = await createSessionRepository({ homeDir: home, cwd });
 
-    await expect(repository.list({ scope: "all" })).resolves.toMatchObject([{ title: "Valid run" }]);
-    await expect(repository.list({ scope: "all" })).resolves.toHaveLength(1);
+    await expect(repository.list({ scope: "all", limit: 1 })).resolves.toMatchObject([{ title: "Valid run" }]);
+    await expect(repository.list({ scope: "all", limit: 1 })).resolves.toHaveLength(1);
   });
 
-  it("caches stable loads, invalidates changed files, and keeps every returned value path-free", async () => {
+  it("caches stable raw loads, invalidates changed files, and keeps public summaries path-free", async () => {
     const home = await makeHome();
     const cwd = path.join(home, "work", "tracelens");
     const file = path.join(home, ".codex", "sessions", "stable.jsonl");
@@ -87,7 +92,9 @@ describe("createSessionRepository", () => {
     const cached = await repository.load(summary.id);
     expect(cached).toBe(first);
     expectNoAbsolutePath(summary, home);
-    expectNoAbsolutePath(first, home);
+    const sourceRecords = first.source.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    expect(sourceRecords[1].payload.cwd).toBe(cwd);
+    expect(first.query.timeline().items[0].name).not.toContain(home);
 
     await appendFile(file, "\n");
     const changed = await repository.load(summary.id);
@@ -129,7 +136,7 @@ describe("createSessionRepository", () => {
     expect(loaded.source).toContain("event-2");
   });
 
-  it("redacts local file URIs from titles, source, and loaded session DTOs", async () => {
+  it("keeps raw local evidence internally while sanitizing public and query text", async () => {
     const home = await makeHome();
     const cwd = path.join(home, "work", "tracelens");
     const file = path.join(home, ".codex", "sessions", "file-uri.jsonl");
@@ -140,11 +147,72 @@ describe("createSessionRepository", () => {
     const [summary] = await repository.list();
     const loaded = await repository.load(summary.id);
 
-    for (const value of [summary, loaded]) {
-      expectNoAbsolutePath(value, posixUri);
-      expectNoAbsolutePath(value, windowsUri);
-    }
-    expect(loaded.source).toContain("<absolute-path>");
+    expectNoAbsolutePath(summary, posixUri);
+    expectNoAbsolutePath(summary, windowsUri);
+    expect(loaded.source).toContain(posixUri);
+    expect(loaded.source).toContain(windowsUri);
+    expect(loaded.query.timeline().items.map((item) => item.name).join(" ")).not.toContain(posixUri);
+  });
+
+  it("parses distinct absolute-path inputs and path-like IDs before output sanitization", async () => {
+    const home = await makeHome();
+    const cwd = path.join(home, "work", "tracelens");
+    const explicitFile = path.join(home, "raw-identity.json");
+    const windowsId = "C:\\private\\events\\first.json";
+    const posixId = "/var/private/events/second.json";
+    const windowsInput = "C:\\private\\inputs\\first.txt";
+    const posixInput = "/var/private/inputs/second.txt";
+    await writeFile(explicitFile, JSON.stringify([
+      {
+        span_id: windowsId,
+        trace_id: "trace",
+        name: "read_file",
+        start_time: 1,
+        end_time: 2,
+        status_code: "OK",
+        attributes: { "openinference.span.kind": "TOOL", "input.value": windowsInput },
+      },
+      {
+        span_id: posixId,
+        trace_id: "trace",
+        name: "read_file",
+        start_time: 3,
+        end_time: 4,
+        status_code: "OK",
+        attributes: { "openinference.span.kind": "TOOL", "input.value": posixInput },
+      },
+    ]));
+    const repository = await createSessionRepository({ homeDir: home, cwd, explicitFile });
+    const [summary] = await repository.list({ scope: "all" });
+    const loaded = await repository.load(summary.id);
+
+    expect([...loaded.trace.byId.keys()]).toEqual([windowsId, posixId]);
+    expect(loaded.trace.byId.get(windowsId)?.input).toBe(windowsInput);
+    expect(loaded.trace.byId.get(posixId)?.input).toBe(posixInput);
+    expect(loaded.facts.repeatedOperations).toEqual([]);
+  });
+
+  it("accepts one unterminated malformed tail only for discovered active JSONL", async () => {
+    const home = await makeHome();
+    const cwd = path.join(home, "work", "tracelens");
+    const file = path.join(home, ".codex", "sessions", "active.jsonl");
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, [
+      JSON.stringify({ type: "thread.started", thread_id: "active-thread" }),
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "Working" } }),
+      '{"type":"item.started"',
+    ].join("\n"));
+
+    const discovered = await createSessionRepository({ homeDir: home, cwd });
+    const summaries = await discovered.list({ scope: "all", limit: 1 });
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].lifecycle).toBe("active");
+    expect((await discovered.load(summaries[0].id)).trace.byId.has("item-1")).toBe(true);
+
+    const explicit = await createSessionRepository({ homeDir: home, cwd, explicitFile: file });
+    await expect(explicit.list({ scope: "all" })).resolves.toEqual([]);
   });
 
   it("validates an explicit file without falling back to discovery roots", async () => {

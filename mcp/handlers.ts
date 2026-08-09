@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { SessionNotFoundError, type LoadedSession, type SessionRepository } from "../cli/repository";
 import type { ViewerService } from "../cli/server";
+import { publicEventId } from "../src/core/session/publicIds";
 import { DETAIL_CONTENT_CHARS, SEARCH_LIMIT, TIMELINE_LIMIT } from "../src/core/session/query";
 import { clipText } from "../src/core/session/sanitize";
 import type {
@@ -15,7 +15,6 @@ import type {
 import type { SpanKind, SpanStatus } from "../src/core/types";
 
 const LIST_LIMIT = 20;
-const OPAQUE_EVENT_PREFIX = "evt_";
 
 export interface TraceLensToolResult<T> {
   dataClassification: "untrusted-local-log";
@@ -52,27 +51,17 @@ function boundedLimit(value: number | undefined, cap: number): number {
   return Math.min(cap, Math.max(1, Math.floor(value as number)));
 }
 
-function opaqueEventId(sessionId: string, rawEventId: string): string {
-  const digest = createHash("sha256")
-    .update("tracelens-mcp-event-v1\0")
-    .update(sessionId)
-    .update("\0")
-    .update(rawEventId)
-    .digest("hex");
-  return `${OPAQUE_EVENT_PREFIX}${digest}`;
-}
-
 function eventIdMap(loaded: LoadedSession): EventIdMap {
   const byOpaque = new Map<string, string>();
-  for (const rawEventId of loaded.trace.byId.keys()) byOpaque.set(opaqueEventId(loaded.summary.id, rawEventId), rawEventId);
+  for (const rawEventId of loaded.trace.byId.keys()) byOpaque.set(publicEventId(loaded.summary.id, rawEventId), rawEventId);
   return {
-    opaque: (rawEventId) => opaqueEventId(loaded.summary.id, rawEventId),
+    opaque: (rawEventId) => publicEventId(loaded.summary.id, rawEventId),
     raw: (publicEventId) => byOpaque.get(publicEventId),
   };
 }
 
 function publicEventRef(event: EventRef, sessionId: string): EventRef {
-  return { ...event, eventId: opaqueEventId(sessionId, event.eventId) };
+  return { ...event, eventId: publicEventId(sessionId, event.eventId) };
 }
 
 function publicFacts(facts: RunFacts, sessionId: string): RunFacts {
@@ -83,7 +72,7 @@ function publicFacts(facts: RunFacts, sessionId: string): RunFacts {
     highestTokenEvents: facts.highestTokenEvents.map((event) => publicEventRef(event, sessionId)),
     repeatedOperations: facts.repeatedOperations.map((operation) => ({
       ...operation,
-      eventIds: operation.eventIds.map((eventId) => opaqueEventId(sessionId, eventId)),
+      eventIds: operation.eventIds.map((eventId) => publicEventId(sessionId, eventId)),
     })),
   };
 }
