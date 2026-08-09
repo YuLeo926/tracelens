@@ -26,8 +26,11 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run typecheck:cli
       - run: npm test
       - run: npm run build
+      - run: npm run pack:check
       # Enables Pages on first run and wires up the artifact upload base path.
       - uses: actions/configure-pages@v5
         with:

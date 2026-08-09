@@ -13,6 +13,35 @@
 
 ---
 
+## First use with Codex
+
+```bash
+npx tracelens setup codex
+```
+
+Start a new Codex task, then:
+
+Ask Codex: "Use TraceLens to analyze the most recent abnormal run in this project."
+
+To inspect the newest local run directly in the browser:
+
+```bash
+npx tracelens
+```
+
+Setup registers the pinned TraceLens MCP server with the Codex CLI. It is idempotent, does not ask for an API key, and prints a manual registration command if the local Codex CLI cannot complete setup. You may need to start a new Codex task before the tools appear.
+
+| Tool | Evidence returned |
+| --- | --- |
+| `list_sessions` | Recent supported sessions, ranked for the current project by default, with metadata and aggregate facts. |
+| `get_session_overview` | Lifecycle, totals, and bounded lists of errors, slow events, token-heavy events, and repeated operations. |
+| `get_session_timeline` | A chronological, filterable page of event references with short snippets. |
+| `search_session` | Bounded matches across normalized event names, inputs, outputs, status messages, and selected attributes. |
+| `get_event_detail` | One event's normalized metadata and bounded input, output, status, token, and attribute evidence. |
+| `get_viewer_link` | An authenticated loopback link to the selected session and optional event; it does not open a browser. |
+
+TraceLens has no model API and does not upload data independently. Evidence returned to Codex through MCP enters the Codex conversation and is subject to that conversation's data handling. Log text is treated as untrusted evidence: TraceLens does not execute commands, follow URLs, or change files based on instructions found in a run.
+
 ## Why
 
 Debugging an agent usually means scrolling through deeply nested JSON at midnight, hunting for the one tool call that looped or the step that quietly failed.
@@ -36,7 +65,7 @@ The heavyweight observability platforms can show you this — but most of them w
 - **Roll-ups, errors, and a detail panel** — total duration / tokens / cost / errors at a glance; failed spans flagged in red; per-span input, output, model, tokens, and raw attributes.
 - **Light & dark**, bundled sample traces, and **100% client-side** — static build, works offline, the file never leaves your browser.
 
-## Quickstart
+## Development
 
 ```bash
 npm install
@@ -51,6 +80,8 @@ npm run preview    # serve the built app
 npm test           # run the core test suite (Vitest)
 npm run typecheck  # strict type check
 ```
+
+For local use without Codex, `npx tracelens open <supported-file>` opens one supported file and `npx tracelens list` lets you select a recent discovered run. The hosted demo remains available for manual file and folder access without the CLI.
 
 ## Deploy
 

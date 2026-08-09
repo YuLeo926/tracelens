@@ -89,13 +89,23 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
 
       <div className="mx-auto flex max-w-xl flex-1 flex-col items-center justify-center gap-8 px-6 py-16 text-center">
         <div className="flex flex-col gap-3">
-          <h1 className="text-2xl text-text">See what your agent actually did.</h1>
+          <h1 className="text-2xl text-text">Open an agent run.</h1>
           <p className="text-sm leading-relaxed text-muted">
-            Drop in an OpenInference or OTel GenAI trace. Tracelens turns it into a readable
-            call tree with timings, tokens, cost, and errors — all in your browser. Nothing is
-            uploaded.
+            Open a local Codex or Claude Code folder, or import a supported trace file. Everything
+            is read locally in your browser.
           </p>
         </div>
+
+        {onStartLive && supportsFolderWatch() && (
+          <button
+            type="button"
+            onClick={onStartLive}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent-strong bg-accent-strong px-6 py-3 text-sm text-on-accent hover:brightness-110"
+          >
+            📂 Open a run folder
+            <span className="text-[12px] opacity-75">— browse or follow live</span>
+          </button>
+        )}
 
         <label
           onDragOver={(e) => {
@@ -115,7 +125,7 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
           }}
         >
           <span className="text-sm text-text">Drop a trace file here</span>
-          <span className="text-[12px] text-faint">or click to choose a .json file</span>
+          <span className="text-[12px] text-faint">or choose JSON / JSONL</span>
           <input
             type="file"
             accept={TRACE_FILE_ACCEPT}
@@ -123,17 +133,6 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
             onChange={(e) => onFiles(e.target.files)}
           />
         </label>
-
-        {onStartLive && supportsFolderWatch() && (
-          <button
-            type="button"
-            onClick={onStartLive}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-panel px-6 py-3 text-sm text-text hover:border-accent"
-          >
-            📡 Watch a folder (live)
-            <span className="text-[12px] text-faint">— follow a run as it happens</span>
-          </button>
-        )}
 
         <div className="flex w-full flex-col gap-2">
           <span className="text-[11px] uppercase tracking-wider text-faint">or open a sample</span>
