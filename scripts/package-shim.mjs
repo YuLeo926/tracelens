@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { access, lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
+export const PACKAGE_NAME = "@yuleo/tracelens";
+const PACKAGE_PATH_PARTS = PACKAGE_NAME.split("/");
+
 function isWithin(parent, candidate) {
   const relative = path.relative(parent, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -52,14 +55,15 @@ function commandShimTargets(shimText) {
 
 export async function resolveInstalledBinShim(installDirectory) {
   const binDirectory = path.join(installDirectory, "node_modules", ".bin");
-  const installedEntry = path.join(installDirectory, "node_modules", "tracelens", "dist-cli", "index.js");
+  const installedPackage = path.join(installDirectory, "node_modules", ...PACKAGE_PATH_PARTS);
+  const installedEntry = path.join(installedPackage, "dist-cli", "index.js");
   let resolvedEntry;
   try {
     resolvedEntry = await realpath(installedEntry);
   } catch (error) {
     throw new Error(`Installed tracelens entry is missing: ${installedEntry}`, { cause: error });
   }
-  const resolvedPackage = await realpath(path.join(installDirectory, "node_modules", "tracelens"));
+  const resolvedPackage = await realpath(installedPackage);
   assert(isWithin(resolvedPackage, resolvedEntry), "The installed tracelens entry must remain inside the installed package.");
 
   if (process.platform === "win32") {

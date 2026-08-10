@@ -1,10 +1,21 @@
 {
-  "name": "tracelens",
+  "name": "@yuleo/tracelens",
   "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "Local-first, zero-backend viewer for AI agent traces. Drop in an OpenInference / OTel GenAI trace and see every step, tool call, token and cost — like DevTools for an agent run.",
   "license": "MIT",
+  "homepage": "https://yuleo926.github.io/tracelens/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YuLeo926/tracelens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YuLeo926/tracelens/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "vite",
     "build": "npm run build:web && npm run typecheck:cli && npm run build:cli",

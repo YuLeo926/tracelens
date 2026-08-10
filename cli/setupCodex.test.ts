@@ -4,13 +4,14 @@ import { runCli, type CliDependencies } from "./index";
 import { setupCodex, type CommandRunner } from "./setupCodex";
 
 const VERSION = packageMetadata.version;
-const expectedAddArgs = ["mcp", "add", "tracelens", "--", "npx", "-y", `tracelens@${VERSION}`, "mcp"];
+const PACKAGE_NAME = packageMetadata.name;
+const expectedAddArgs = ["mcp", "add", "tracelens", "--", "npx", "-y", `${PACKAGE_NAME}@${VERSION}`, "mcp"];
 const missing = { exitCode: 1, stdout: "", stderr: "MCP server 'tracelens' not found" };
 const exact = {
   exitCode: 0,
   stdout: JSON.stringify({
     name: "tracelens",
-    transport: { type: "stdio", command: "npx", args: ["-y", `tracelens@${VERSION}`, "mcp"] },
+    transport: { type: "stdio", command: "npx", args: ["-y", `${PACKAGE_NAME}@${VERSION}`, "mcp"] },
   }),
   stderr: "",
 };
@@ -104,7 +105,7 @@ describe("setupCodex", () => {
 
     await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toMatchObject({
       ok: false,
-      message: expect.stringContaining(`codex mcp add tracelens -- npx -y tracelens@${VERSION} mcp`),
+      message: expect.stringContaining(`codex mcp add tracelens -- npx -y ${PACKAGE_NAME}@${VERSION} mcp`),
     });
     expect(run).toHaveBeenCalledOnce();
   });
@@ -164,7 +165,7 @@ describe("setupCodex", () => {
     { name: "tracelens", transport: {} },
     { name: "tracelens", transport: { type: "stdio" } },
     { name: "tracelens", transport: { type: "stdio", command: "npx" } },
-    { transport: { type: "stdio", command: "npx", args: ["-y", `tracelens@${VERSION}`, "mcp"] } },
+    { transport: { type: "stdio", command: "npx", args: ["-y", `${PACKAGE_NAME}@${VERSION}`, "mcp"] } },
   ])("returns a safe error for registration JSON with missing fields", async (registration) => {
     const run = runner({ exitCode: 0, stdout: JSON.stringify(registration), stderr: "" });
 
@@ -258,7 +259,7 @@ describe("runCli setup codex", () => {
 
   it("derives the registered package version from package metadata", async () => {
     vi.resetModules();
-    vi.doMock("../package.json", () => ({ default: { name: "tracelens", version: "9.8.7" } }));
+    vi.doMock("../package.json", () => ({ default: { name: "@example/tracelens", version: "9.8.7" } }));
     try {
       const { runCli: runCliWithMockedMetadata } = await import("./index");
       const run = runner(missing, { exitCode: 0, stdout: "", stderr: "" });
@@ -266,7 +267,7 @@ describe("runCli setup codex", () => {
 
       await expect(runCliWithMockedMetadata(["setup", "codex"], cli.deps)).resolves.toBe(0);
       expect(run).toHaveBeenNthCalledWith(2, "codex", [
-        "mcp", "add", "tracelens", "--", "npx", "-y", "tracelens@9.8.7", "mcp",
+        "mcp", "add", "tracelens", "--", "npx", "-y", "@example/tracelens@9.8.7", "mcp",
       ]);
     } finally {
       vi.doUnmock("../package.json");

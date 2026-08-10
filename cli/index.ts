@@ -20,6 +20,7 @@ const USAGE = [
   "Open the newest local session for this project, or select a session with list.",
 ].join("\n");
 const MAX_DISPLAY_LENGTH = 160;
+const PACKAGE_NAME = packageMetadata.name;
 const PACKAGE_VERSION = packageMetadata.version;
 
 type CreateRepository = typeof createSessionRepository;
@@ -195,6 +196,7 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
   if (args.command === "setup-codex") {
     const result = await setupCodex({
       force: args.force,
+      packageName: PACKAGE_NAME,
       packageVersion: PACKAGE_VERSION,
       run: deps.runCommand ?? runCommand,
     });

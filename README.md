@@ -16,7 +16,7 @@
 ## First use with Codex
 
 ```bash
-npx tracelens setup codex
+npx @yuleo/tracelens setup codex
 ```
 
 Start a new Codex task, then:
@@ -26,7 +26,7 @@ Ask Codex: "Use TraceLens to analyze the most recent abnormal run in this projec
 To inspect the newest local run directly in the browser:
 
 ```bash
-npx tracelens
+npx @yuleo/tracelens
 ```
 
 Setup registers the pinned TraceLens MCP server with the Codex CLI. It is idempotent, does not ask for an API key, and prints a manual registration command if the local Codex CLI cannot complete setup. You may need to start a new Codex task before the tools appear.
@@ -81,7 +81,7 @@ npm test           # run the core test suite (Vitest)
 npm run typecheck  # strict type check
 ```
 
-For local use without Codex, `npx tracelens open <supported-file>` opens one supported file and `npx tracelens list` lets you select a recent discovered run. The hosted demo remains available for manual file and folder access without the CLI.
+For local use without Codex, `npx @yuleo/tracelens open <supported-file>` opens one supported file and `npx @yuleo/tracelens list` lets you select a recent discovered run. The hosted demo remains available for manual file and folder access without the CLI.
 
 ## Deploy
 

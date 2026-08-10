@@ -5,15 +5,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { OwnedProcessRegistry, removeVerifiedSystemTempRoot, runCommand, withHardTimeout } from "./process-control.mjs";
-import { installedShimInvocation, resolveInstalledBinShim } from "./package-shim.mjs";
+import { PACKAGE_NAME, installedShimInvocation, resolveInstalledBinShim } from "./package-shim.mjs";
 import { OwnedStdioClientTransport } from "./owned-stdio-transport.mjs";
 
 const TEMP_PREFIX = "tracelens-package-smoke-self-test-";
+const PACKAGE_PATH_PARTS = PACKAGE_NAME.split("/");
 
 async function writeFixtureInstallation(temporaryRoot) {
   const installDirectory = path.join(temporaryRoot, process.platform === "win32" ? "install-%PATH%" : "install");
   const binDirectory = path.join(installDirectory, "node_modules", ".bin");
-  const packageDirectory = path.join(installDirectory, "node_modules", "tracelens");
+  const packageDirectory = path.join(installDirectory, "node_modules", ...PACKAGE_PATH_PARTS);
   const entry = path.join(packageDirectory, "dist-cli", "index.js");
   await Promise.all([
     mkdir(binDirectory, { recursive: true }),
@@ -27,11 +28,11 @@ async function writeFixtureInstallation(temporaryRoot) {
     await writeFile(shim, [
       "@ECHO off",
       "SET dp0=%~dp0",
-      "\"node.exe\" \"%dp0%\\..\\tracelens\\dist-cli\\index.js\" %*",
+      `"node.exe" "%dp0%\\..\\${PACKAGE_PATH_PARTS.join("\\")}\\dist-cli\\index.js" %*`,
       "",
     ].join("\n"), "utf8");
   } else {
-    await symlink("../tracelens/dist-cli/index.js", path.join(binDirectory, "tracelens"));
+    await symlink(path.posix.join("..", ...PACKAGE_PATH_PARTS, "dist-cli", "index.js"), path.join(binDirectory, "tracelens"));
   }
   return { installDirectory, entry };
 }
@@ -43,8 +44,9 @@ async function assertLocalShimOnly(temporaryRoot) {
   const shimPath = path.join(binDirectory, shimName);
 
   const missingDirectory = path.join(temporaryRoot, "missing");
-  await mkdir(path.join(missingDirectory, "node_modules", "tracelens", "dist-cli"), { recursive: true });
-  await writeFile(path.join(missingDirectory, "node_modules", "tracelens", "dist-cli", "index.js"), "", "utf8");
+  const missingPackage = path.join(missingDirectory, "node_modules", ...PACKAGE_PATH_PARTS, "dist-cli");
+  await mkdir(missingPackage, { recursive: true });
+  await writeFile(path.join(missingPackage, "index.js"), "", "utf8");
   await assert.rejects(
     resolveInstalledBinShim(missingDirectory),
     /local npm bin shim/i,
