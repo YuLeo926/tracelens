@@ -59,8 +59,10 @@ async function assertLocalShimOnly(temporaryRoot) {
       "",
     ].join("\n"), "utf8");
   } else {
-    await writeFile(path.join(temporaryRoot, "wrong-entry.js"), "", "utf8");
-    await symlink(path.join(temporaryRoot, "wrong-entry.js"), `${shimPath}.broken`);
+    const wrongEntry = path.join(temporaryRoot, "wrong-entry.js");
+    await writeFile(wrongEntry, "", "utf8");
+    await chmod(wrongEntry, 0o755);
+    await symlink(wrongEntry, `${shimPath}.broken`);
     await (await import("node:fs/promises")).rename(`${shimPath}.broken`, shimPath);
   }
   await assert.rejects(
