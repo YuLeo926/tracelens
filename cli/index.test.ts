@@ -4,10 +4,36 @@ import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import packageMetadata from "../package.json";
 import type { SessionSummary } from "../src/core/session/types";
 import type { SessionRepository } from "./repository";
 import type { ViewerService } from "./server";
-import { isExecutedDirectly, runCli, type CliDependencies } from "./index";
+import { commandInvocation, isExecutedDirectly, runCli, type CliDependencies } from "./index";
+
+describe("commandInvocation", () => {
+  it("uses cmd.exe for npm command shims on Windows", () => {
+    expect(commandInvocation(
+      "codex",
+      ["mcp", "add", "tracelens", "--", "npx", "-y", "@yuleo/tracelens@0.2.1", "mcp"],
+      "win32",
+      { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+    )).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "codex mcp add tracelens -- npx -y @yuleo/tracelens@0.2.1 mcp"],
+    });
+  });
+
+  it("keeps direct execution on POSIX", () => {
+    expect(commandInvocation("codex", ["mcp", "get", "tracelens", "--json"], "linux", {})).toEqual({
+      command: "codex",
+      args: ["mcp", "get", "tracelens", "--json"],
+    });
+  });
+
+  it("rejects shell metacharacters before invoking cmd.exe", () => {
+    expect(() => commandInvocation("codex", ["mcp", "&", "whoami"], "win32", {})).toThrow("Unsafe Windows command token.");
+  });
+});
 
 function deferred<T = void>(): { promise: Promise<T>; resolve(value: T): void; reject(reason: unknown): void } {
   let resolve!: (value: T) => void;
@@ -141,7 +167,7 @@ describe("runCli", () => {
 
     await expect(runCli(["mcp"], test.deps)).resolves.toBe(0);
 
-    expect(test.deps.serveMcp).toHaveBeenCalledWith(test.repository, test.viewer, "0.2.0");
+    expect(test.deps.serveMcp).toHaveBeenCalledWith(test.repository, test.viewer, packageMetadata.version);
     expect(test.out.text()).toBe("");
     expect(test.deps.openBrowser).not.toHaveBeenCalled();
     expect(test.viewer.close).not.toHaveBeenCalled();
@@ -155,7 +181,7 @@ describe("runCli", () => {
     await expect(runCli(["mcp"], test.deps)).resolves.toBe(0);
 
     expect(test.deps.resolveServeMcp).toHaveBeenCalledOnce();
-    expect(serve).toHaveBeenCalledWith(test.repository, test.viewer, "0.2.0");
+    expect(serve).toHaveBeenCalledWith(test.repository, test.viewer, packageMetadata.version);
     expect(test.out.text()).toBe("");
   });
 

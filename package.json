@@ -1,6 +1,6 @@
 {
   "name": "@yuleo/tracelens",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "Local-first, zero-backend viewer for AI agent traces. Drop in an OpenInference / OTel GenAI trace and see every step, tool call, token and cost — like DevTools for an agent run.",

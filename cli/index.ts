@@ -29,6 +29,7 @@ type ServeMcp = typeof import("../mcp/server").serveMcp;
 type ResolveServeMcp = () => Promise<ServeMcp>;
 type RegisterSignal = (signal: NodeJS.Signals, listener: () => void) => () => void;
 type ShutdownResult<T> = { kind: "value"; value: T } | { kind: "error"; error: unknown } | { kind: "shutdown" };
+type CommandInvocation = { command: string; args: string[] };
 
 export interface CliDependencies {
   homeDir: string;
@@ -66,6 +67,25 @@ async function resolveServeMcp(): Promise<ServeMcp> {
   return (await import("../mcp/server")).serveMcp;
 }
 
+export function commandInvocation(
+  command: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+  environment: NodeJS.ProcessEnv = process.env,
+): CommandInvocation {
+  if (platform !== "win32") return { command, args };
+
+  const tokens = [command, ...args];
+  if (!tokens.every((token) => /^[A-Za-z0-9@._/:=-]+$/.test(token))) {
+    throw new Error("Unsafe Windows command token.");
+  }
+  const windowsRoot = environment.SystemRoot ?? environment.WINDIR ?? "C:\\Windows";
+  return {
+    command: environment.ComSpec ?? path.join(windowsRoot, "System32", "cmd.exe"),
+    args: ["/d", "/s", "/c", tokens.join(" ")],
+  };
+}
+
 function runCommand(command: string, args: string[]): Promise<CommandResult> {
   return new Promise((resolve) => {
     let settled = false;
@@ -76,7 +96,8 @@ function runCommand(command: string, args: string[]): Promise<CommandResult> {
     };
     let child;
     try {
-      child = spawn(command, args, { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      const invocation = commandInvocation(command, args);
+      child = spawn(invocation.command, invocation.args, { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     } catch {
       finish({ exitCode: 1, stdout: "", stderr: "" });
       return;
