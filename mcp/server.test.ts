@@ -14,6 +14,12 @@ type RegisteredTool = {
   name: string;
   description: string;
   inputSchema: z.ZodType;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
   handler: (args: Record<string, unknown>) => Promise<ToolResponse>;
 };
 
@@ -77,6 +83,12 @@ describe("MCP tool registration", () => {
       expect(registeredTool.description).toContain("observations");
       expect(registeredTool.description).toContain("inferences");
       expect(registeredTool.description).toContain("list_sessions");
+      expect(registeredTool.annotations).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
     }
     await expect(registered[0].handler({})).resolves.toEqual({
       content: [{ type: "text", text: "{\"dataClassification\":\"untrusted-local-log\",\"data\":[]}" }],
