@@ -1,0 +1,87 @@
+name: First-run feedback
+description: Tell us whether TraceLens completed a useful first Codex analysis.
+title: "[First run] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying TraceLens. This issue is public.
+
+        Do not include logs, local paths, secrets, private code, prompts, or conversation contents.
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: codex-surface
+    attributes:
+      label: Codex surface
+      options:
+        - Codex CLI
+        - Codex Desktop
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Did setup complete?
+      options:
+        - "Yes"
+        - "No"
+        - "Unsure"
+    validations:
+      required: true
+  - type: dropdown
+    id: session-selection
+    attributes:
+      label: Did TraceLens select the correct session?
+      options:
+        - "Yes"
+        - "No"
+        - "Unsure"
+        - Analysis was not reached
+    validations:
+      required: true
+  - type: dropdown
+    id: analysis-useful
+    attributes:
+      label: Was the analysis useful?
+      options:
+        - "Yes"
+        - "Partly"
+        - "No"
+        - Analysis was not reached
+    validations:
+      required: true
+  - type: dropdown
+    id: reuse
+    attributes:
+      label: Would you use TraceLens again?
+      options:
+        - "Yes"
+        - "Maybe"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Optional details
+      description: This text will be public. Describe the step that helped or failed without including project or session data.
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I have not included private project or session data.
+          required: true
