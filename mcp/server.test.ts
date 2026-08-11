@@ -83,12 +83,19 @@ describe("MCP tool registration", () => {
       expect(registeredTool.description).toContain("observations");
       expect(registeredTool.description).toContain("inferences");
       expect(registeredTool.description).toContain("list_sessions");
-      expect(registeredTool.annotations).toEqual({
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      });
+      expect(registeredTool.annotations).toEqual(registeredTool.name === "get_viewer_link"
+        ? {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        }
+        : {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        });
     }
     await expect(registered[0].handler({})).resolves.toEqual({
       content: [{ type: "text", text: "{\"dataClassification\":\"untrusted-local-log\",\"data\":[]}" }],

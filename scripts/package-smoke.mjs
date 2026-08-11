@@ -24,6 +24,18 @@ const REQUIRED_TOOLS = [
   "get_event_detail",
   "get_viewer_link",
 ];
+const EVIDENCE_TOOL_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+const VIEWER_LINK_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+};
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const npmCli = process.env.npm_execpath;
 const TEMP_PREFIX = "tracelens-package-smoke-";
@@ -83,6 +95,13 @@ function assertCompleteToolResult(toolResult, temporaryPaths) {
   assert.deepEqual(parsedText, toolResult.structuredContent, "Text and structured MCP results must be semantically identical.");
   assertNoTemporaryPath(toolResult, temporaryPaths);
   return toolResult.structuredContent;
+}
+
+function assertInstalledToolAnnotations(tools) {
+  for (const tool of tools) {
+    const expected = tool.name === "get_viewer_link" ? VIEWER_LINK_ANNOTATIONS : EVIDENCE_TOOL_ANNOTATIONS;
+    assert.deepEqual(tool.annotations, expected, `Installed ${tool.name} annotations do not match the declared tool effects.`);
+  }
 }
 
 function sampleSession(projectDirectory) {
@@ -178,6 +197,7 @@ async function main() {
 
     const listedTools = await withHardTimeout(client.listTools(), 5_000, "MCP listTools");
     assert.deepEqual(listedTools.tools.map((tool) => tool.name).sort(), [...REQUIRED_TOOLS].sort());
+    assertInstalledToolAnnotations(listedTools.tools);
 
     const listedSessions = await withHardTimeout(
       client.callTool({
