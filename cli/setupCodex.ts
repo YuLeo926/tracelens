@@ -1,4 +1,5 @@
 import packageMetadata from "../package.json";
+import { FIRST_RUN_FEEDBACK_URL, FIRST_RUN_PROMPT } from "../src/core/firstRun";
 
 export interface CommandResult {
   exitCode: number;
@@ -22,8 +23,11 @@ export interface SetupCodexResult {
 }
 
 const CONNECTION_MESSAGE = [
-  "TraceLens is connected to Codex. Start a new Codex task, then ask it to use TraceLens to inspect a run.",
+  "TraceLens is connected to Codex.",
+  "Start a new Codex task in the project you want to inspect.",
+  `Ask Codex: "${FIRST_RUN_PROMPT}"`,
   "Evidence requested through TraceLens tools becomes part of the Codex conversation.",
+  `First-run feedback (optional): ${FIRST_RUN_FEEDBACK_URL}`,
 ].join("\n");
 
 function packageSpec(packageName: string, packageVersion: string): string {

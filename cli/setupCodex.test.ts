@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import packageMetadata from "../package.json";
+import { FIRST_RUN_FEEDBACK_URL, FIRST_RUN_PROMPT } from "../src/core/firstRun";
 import { runCli, type CliDependencies } from "./index";
 import { setupCodex, type CommandRunner } from "./setupCodex";
 
@@ -23,6 +24,13 @@ const conflict = {
   }),
   stderr: "",
 };
+const expectedConnectionMessage = [
+  "TraceLens is connected to Codex.",
+  "Start a new Codex task in the project you want to inspect.",
+  `Ask Codex: "${FIRST_RUN_PROMPT}"`,
+  "Evidence requested through TraceLens tools becomes part of the Codex conversation.",
+  `First-run feedback (optional): ${FIRST_RUN_FEEDBACK_URL}`,
+].join("\n");
 
 function runner(...results: Array<{ exitCode: number; stdout: string; stderr: string }>): CommandRunner {
   return vi.fn(async () => results.shift() ?? { exitCode: 1, stdout: "", stderr: "unexpected command" });
@@ -53,12 +61,7 @@ describe("setupCodex", () => {
     const run = runner(missing, { exitCode: 0, stdout: "", stderr: "" });
 
     const result = await setupCodex({ force: false, packageVersion: VERSION, run });
-    expect(result).toMatchObject({
-      ok: true,
-      changed: true,
-      message: expect.stringContaining("TraceLens is connected to Codex. Start a new Codex task, then ask it to use TraceLens to inspect a run."),
-    });
-    expect(result.message).toContain("Evidence requested through TraceLens tools becomes part of the Codex conversation.");
+    expect(result.message).toBe(expectedConnectionMessage);
     expect(run).toHaveBeenNthCalledWith(1, "codex", ["mcp", "get", "tracelens", "--json"]);
     expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
   });
@@ -80,7 +83,11 @@ describe("setupCodex", () => {
   it("leaves an exact stdio registration unchanged", async () => {
     const run = runner(exact);
 
-    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toMatchObject({ ok: true, changed: false });
+    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toMatchObject({
+      ok: true,
+      changed: false,
+      message: expectedConnectionMessage,
+    });
     expect(run).toHaveBeenCalledOnce();
   });
 
@@ -248,11 +255,7 @@ describe("runCli setup codex", () => {
     await expect(runCli(["setup", "codex"], cli.deps)).resolves.toBe(0);
 
     expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
-    expect(cli.stdout.write).toHaveBeenCalledWith([
-      "TraceLens is connected to Codex. Start a new Codex task, then ask it to use TraceLens to inspect a run.",
-      "Evidence requested through TraceLens tools becomes part of the Codex conversation.",
-      "",
-    ].join("\n"));
+    expect(cli.stdout.write).toHaveBeenCalledWith(`${expectedConnectionMessage}\n`);
     expect(cli.stderr.write).not.toHaveBeenCalled();
     expect(cli.deps.createRepository).not.toHaveBeenCalled();
   });
