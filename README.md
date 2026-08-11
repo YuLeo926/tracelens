@@ -13,23 +13,43 @@
 
 ---
 
-## First use with Codex
+## Analyze a Codex run
+
+**Prerequisites:** Node.js 20 or newer, the Codex CLI for MCP registration, and at least one local Codex session.
+
+Connect TraceLens to Codex:
 
 ```bash
 npx @yuleo/tracelens setup codex
 ```
 
-Start a new Codex task, then:
+Start a new Codex CLI or Desktop task that can access the registered MCP server, in the project you want to inspect, then ask:
 
-Ask Codex: "Use TraceLens to analyze the most recent abnormal run in this project."
+> Use TraceLens to analyze the most recent abnormal run in this project.
 
-To inspect the newest local run directly in the browser:
+TraceLens ranks recent sessions for the current project and gives Codex bounded, read-only evidence. No separate model API or TraceLens account is required.
+
+### What success looks like
+
+Codex should identify the selected session, explain what happened, and cite one or more TraceLens event IDs. You can ask it to open the cited evidence in the local viewer, or run the viewer directly:
 
 ```bash
 npx @yuleo/tracelens
 ```
 
-Setup registers the pinned TraceLens MCP server with the Codex CLI. It is idempotent, does not ask for an API key, and prints a manual registration command if the local Codex CLI cannot complete setup. You may need to start a new Codex task before the tools appear.
+An incomplete log may support observations without proving a root cause. Treat the cited events as the source of truth.
+
+[Share first-run feedback](https://github.com/YuLeo926/tracelens/issues/new?template=first-run-feedback.yml) after trying the flow. The form is optional and public; do not include logs, paths, secrets, private code, prompts, or conversation contents.
+
+### First-run troubleshooting
+
+- **TraceLens tools are missing:** start a new Codex task after setup.
+- **No supported sessions were found:** run Codex in the project first, or open a supported file with `npx @yuleo/tracelens open <file>`.
+- **The wrong project session was selected:** start the Codex task from the intended project directory and ask TraceLens to list the candidate sessions before choosing one.
+- **A different TraceLens registration already exists:** inspect it with `codex mcp get tracelens --json`; replace it only when intended with `npx @yuleo/tracelens setup codex --force`.
+- **You want to verify the evidence:** ask Codex for a TraceLens viewer link or run `npx @yuleo/tracelens list`.
+
+Setup is idempotent and pins the installed TraceLens version. Evidence requested through MCP enters the current Codex conversation and follows that conversation's data handling. Log text is treated as untrusted evidence and is never executed by TraceLens.
 
 | Tool | Evidence returned |
 | --- | --- |

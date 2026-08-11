@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { FIRST_RUN_FEEDBACK_URL } from "./firstRun";
+import { FIRST_RUN_FEEDBACK_URL, FIRST_RUN_PROMPT } from "./firstRun";
 
 interface FormOption {
   label: string;
@@ -30,6 +30,7 @@ const formText = readFileSync(
   "utf8",
 );
 const form = parse(formText) as IssueForm;
+const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
 const byId = new Map<string, FormField>(
   form.body.flatMap((field) => (field.id ? [[field.id, field] as const] : [])),
 );
@@ -61,5 +62,14 @@ describe("first-run feedback assets", () => {
       label: "I have not included private project or session data.",
       required: true,
     });
+  });
+
+  it("keeps the self-service quickstart aligned with the product contract", () => {
+    expect(readme).toContain("## Analyze a Codex run");
+    expect(readme).toContain("npx @yuleo/tracelens setup codex");
+    expect(readme).toContain(FIRST_RUN_PROMPT);
+    expect(readme).toContain(FIRST_RUN_FEEDBACK_URL);
+    expect(readme).toContain("### What success looks like");
+    expect(readme).toContain("### First-run troubleshooting");
   });
 });
