@@ -61,6 +61,7 @@ describe("setupCodex", () => {
     const run = runner(missing, { exitCode: 0, stdout: "", stderr: "" });
 
     const result = await setupCodex({ force: false, packageVersion: VERSION, run });
+    expect(result).toMatchObject({ ok: true, changed: true });
     expect(result.message).toBe(expectedConnectionMessage);
     expect(run).toHaveBeenNthCalledWith(1, "codex", ["mcp", "get", "tracelens", "--json"]);
     expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
