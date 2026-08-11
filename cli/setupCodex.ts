@@ -52,11 +52,17 @@ function unavailable(packageName: string, packageVersion: string): SetupCodexRes
 
 function isMissing(result: CommandResult): boolean {
   if (result.exitCode !== 1) return false;
-  const messages = [result.stdout, result.stderr].map((value) => value.trim()).filter(Boolean);
-  if (messages.length !== 1) return false;
-  const message = messages[0];
-  return /^(?:error:\s*)?no\s+mcp\s+(?:server|registration)\s+named\s+['"]?tracelens['"]?\s+found[.!]?$/i.test(message)
-    || /^(?:error:\s*)?mcp (?:server|registration)(?: named)? ['"]?tracelens['"]? (?:was )?not found[.!]?$/i.test(message);
+  const lines = [result.stdout, result.stderr]
+    .flatMap((value) => value.split(/\r?\n/))
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+  const missingRegistration = (line: string) => (
+    /^(?:error:\s*)?no\s+mcp\s+(?:server|registration)\s+named\s+['"]?tracelens['"]?\s+found[.!]?$/i.test(line)
+    || /^(?:error:\s*)?mcp (?:server|registration)(?: named)? ['"]?tracelens['"]? (?:was )?not found[.!]?$/i.test(line)
+  );
+
+  return lines.some(missingRegistration)
+    && lines.every((line) => missingRegistration(line) || /^warning\s*:/i.test(line));
 }
 
 function hasExpectedTransport(output: string, packageName: string, packageVersion: string): boolean | undefined {

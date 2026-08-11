@@ -8,6 +8,8 @@ const VERSION = packageMetadata.version;
 const PACKAGE_NAME = packageMetadata.name;
 const expectedAddArgs = ["mcp", "add", "tracelens", "--", "npx", "-y", `${PACKAGE_NAME}@${VERSION}`, "mcp"];
 const missing = { exitCode: 1, stdout: "", stderr: "MCP server 'tracelens' not found" };
+const pathAliasWarning = "WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir \"C:\\\\Users\\\\test\\\\AppData\\\\Local\\\\Temp\\\\\"";
+const officialMissingRegistration = "Error: No MCP server named 'tracelens' found.";
 const exact = {
   exitCode: 0,
   stdout: JSON.stringify({
@@ -81,6 +83,22 @@ describe("setupCodex", () => {
     expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
   });
 
+  it.each([
+    { stdout: "", stderr: `${pathAliasWarning}\n${officialMissingRegistration}` },
+    { stdout: pathAliasWarning, stderr: officialMissingRegistration },
+  ])("adds when a PATH-alias warning precedes the official missing-registration line", async ({ stdout, stderr }) => {
+    const run = runner(
+      { exitCode: 1, stdout, stderr },
+      { exitCode: 0, stdout: "", stderr: "" },
+    );
+
+    await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    expect(run).toHaveBeenNthCalledWith(2, "codex", expectedAddArgs);
+  });
+
   it("leaves an exact stdio registration unchanged", async () => {
     const run = runner(exact);
 
@@ -123,6 +141,8 @@ describe("setupCodex", () => {
     "codex: command not found",
     "Resource not found",
     "MCP server 'tracelens' not found at C:\\private\\codex\\config.toml",
+    `${pathAliasWarning}\nError: No MCP server named 'tracelens' found at C:\\private\\codex\\config.toml`,
+    `${pathAliasWarning}\nError: Resource not found`,
     "error: unexpected argument '--json'",
     "error: unrecognized subcommand 'mcp'",
   ])("does not add when the failure is unrelated to a missing TraceLens registration: %s", async (stderr) => {
