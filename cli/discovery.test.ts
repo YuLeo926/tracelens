@@ -34,17 +34,12 @@ function claude(projectPath: string, timestamp: string, title: string) {
   ];
 }
 
-function publicSummary(candidate: SessionCandidate) {
-  const { path: _path, projectPath: _projectPath, ...summary } = candidate;
-  return summary;
-}
-
 afterEach(async () => {
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
 
 describe("discoverSessionCandidates", () => {
-  it("discovers supported Codex and Claude sessions without exposing local paths", async () => {
+  it("discovers supported Codex and Claude sessions with internal source metadata", async () => {
     const home = await makeHome();
     const cwd = path.join(home, "work", "tracelens");
     const codexFile = path.join(home, ".codex", "sessions", "2026", "07", "31", "rollout.jsonl");
@@ -58,8 +53,12 @@ describe("discoverSessionCandidates", () => {
 
     expect(candidates).toHaveLength(2);
     expect(candidates.map((candidate) => candidate.provider).sort()).toEqual(["claude", "codex"]);
-    expect(candidates.find((candidate) => candidate.provider === "codex")?.id).toMatch(/^[a-f0-9]{32}$/);
-    expect(JSON.stringify(publicSummary(candidates[0]))).not.toContain(home);
+    expect(candidates.find((candidate) => candidate.provider === "codex")).toMatchObject({
+      id: expect.stringMatching(/^[a-f0-9]{32}$/),
+      path: codexFile,
+      projectPath: cwd,
+      title: `Investigate ${cwd}`,
+    });
   });
 
   it("skips missing roots, malformed JSONL, and non-trace JSON", async () => {
