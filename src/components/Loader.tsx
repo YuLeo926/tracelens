@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { FIRST_RUN_FEEDBACK_URL } from "../core/firstRun";
 import { parseTraceText } from "../core/parse";
 import type { ParsedTrace } from "../core/types";
 import { supportsFolderWatch } from "../lib/folderWatch";
@@ -149,6 +150,16 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
             ))}
           </div>
         </div>
+
+        <a
+          data-first-run-feedback
+          href={FIRST_RUN_FEEDBACK_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-faint underline decoration-border underline-offset-4 hover:text-muted"
+        >
+          First-run feedback
+        </a>
       </div>
     </div>
   );
