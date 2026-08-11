@@ -18,6 +18,7 @@ describe("Loader first-run feedback", () => {
     expect(link?.href).toBe(FIRST_RUN_FEEDBACK_URL);
     expect(link?.target).toBe("_blank");
     expect(link?.rel.split(" ")).toEqual(expect.arrayContaining(["noopener", "noreferrer"]));
+    expect(link?.classList).toContain("text-muted");
     expect(document.querySelector("[role='dialog']")).toBeNull();
   });
 });

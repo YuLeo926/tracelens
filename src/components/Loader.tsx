@@ -156,7 +156,7 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
           href={FIRST_RUN_FEEDBACK_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[11px] text-faint underline decoration-border underline-offset-4 hover:text-muted"
+          className="text-[11px] text-muted underline decoration-border underline-offset-4 hover:text-muted"
         >
           First-run feedback
         </a>
