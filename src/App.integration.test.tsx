@@ -79,6 +79,39 @@ beforeEach(() => {
 afterEach(async () => { if (root) await act(async () => root.unmount()); host?.remove(); globalThis.fetch = originalFetch; });
 
 describe("App local session integration", () => {
+  it("preserves picker filters and scroll after inspecting a session", async () => {
+    const api = new Api(); const first = summary("first", "First"); const second = summary("second", "Second"); api.sessions = [first, second];
+    await mount(api, route("first")); await resolve(api, first);
+    await click(button("Sessions"));
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Session keyword"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Second");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const list = buttonContaining("Second").parentElement!;
+    await act(async () => { list.scrollTop = 160; list.dispatchEvent(new Event("scroll", { bubbles: true })); });
+    await click(buttonContaining("Second")); await resolve(api, second);
+    await click(button("Sessions"));
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Session keyword"]')!.value).toBe("Second");
+    expect(buttonContaining("Second").parentElement!.scrollTop).toBe(160);
+    expect(host.querySelector('[role="dialog"]')!.textContent).not.toContain("First");
+  });
+  it("opens same-document share links and ignores stale decoding after navigation", async () => {
+    const old = deferred<{ name: string; source: string }>();
+    vi.mocked(decodeShare).mockImplementation((token) => token === "first" ? old.promise : Promise.resolve({ name: "Second shared trace", source: trace("second-shared") }));
+    await mount(new Api());
+    await act(async () => { window.history.pushState(null, "", "/#t=first"); window.dispatchEvent(new HashChangeEvent("hashchange")); });
+    expect(decodeShare).toHaveBeenCalledWith("first");
+    await act(async () => { window.history.pushState(null, "", "/#t=second"); window.dispatchEvent(new PopStateEvent("popstate")); });
+    await flush();
+    expect(host.textContent).toContain("Second shared trace");
+    await act(async () => old.resolve({ name: "Stale shared trace", source: trace("old") }));
+    await flush();
+    expect(host.textContent).not.toContain("Stale shared trace");
+    expect(overviewTitle()).toBe("Second shared trace");
+    await click(host.querySelector('button[aria-label="Call tree"]')!);
+    expect(host.querySelector('[data-span-id="second-shared"]')).not.toBeNull();
+  });
   it("keeps a session-mode URL on the local path when a share-style hash is present", async () => {
     const api = new Api();
     vi.mocked(decodeShare).mockResolvedValue({ name: "Shared trace", source: trace("shared") });
@@ -135,9 +168,9 @@ describe("App local session integration", () => {
     const api = new Api(); const current = summary("current", "Current", "evidence"); const replacement = summary("replacement", "Replacement", "evidence"); api.sessions = [current, replacement];
     await mount(api, route("current")); await resolve(api, current, trace("evidence"));
     const opener = button("Sessions"); await click(opener); const close = host.querySelector<HTMLButtonElement>('button[aria-label="Close session picker"]')!;
-    const firstRow = buttonContaining("Current"); const lastRow = buttonContaining("Replacement");
-    close.focus(); await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }))); expect(document.activeElement).toBe(firstRow);
-    firstRow.focus(); await act(async () => firstRow.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }))); expect(document.activeElement).toBe(close);
+    const keyword = host.querySelector<HTMLInputElement>('input[aria-label="Session keyword"]')!; const lastRow = buttonContaining("Replacement");
+    close.focus(); await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }))); expect(document.activeElement).toBe(keyword);
+    keyword.focus(); await act(async () => keyword.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }))); expect(document.activeElement).toBe(close);
     close.focus(); await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }))); expect(document.activeElement).toBe(lastRow);
     close.focus(); await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))); await flush(); expect(document.activeElement).toBe(opener);
     await click(opener); await click(buttonContaining("Replacement")); expect(window.location.search).toBe("?mode=session&session=replacement"); expect(window.location.hash).toBe(`#token=${token}`);
@@ -150,7 +183,9 @@ describe("App local session integration", () => {
   it("isolates same-titled local annotations while preserving manual Loader and label-based annotations", async () => {
     const api = new Api(); const first = summary("opaque-a", "Shared title"); const second = summary("opaque-b", "Shared title"); api.sessions = [first, second];
     await mount(api, route("opaque-a")); await resolve(api, first);
-    await click([...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.includes("Slowest event"))!); await click(host.querySelector("aside button")!);
+    await click([...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.includes("Slowest event"))!);
+    await click(host.querySelector("aside details summary")!);
+    await click(host.querySelector('button[aria-label="Mark as helpful"]')!);
     expect(localStorage.getItem("tracelens:annotations")).toContain("session:opaque-a");
     await click(host.querySelector<HTMLButtonElement>('button[aria-label="Session overview"]')!);
     await click(button("Sessions"));
@@ -164,7 +199,11 @@ describe("App local session integration", () => {
     expect(stored["session:opaque-a"]).toBeDefined(); expect(stored["session:opaque-b"]).toBeUndefined();
     await click(button("New trace")); const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(input, "files", { configurable: true, value: [{ name: "manual.json", text: async () => trace("manual-span") }] });
-    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); await flush(); expect(host.textContent).toContain("Call tree");
-    await click(host.querySelector("aside button")!); expect(localStorage.getItem("tracelens:annotations")).toContain("manual.json");
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); await flush();
+    expect(overviewTitle()).toBe("manual.json");
+    await click(host.querySelector('button[aria-label="Call tree"]')!);
+    await click(host.querySelector("aside details summary")!);
+    await click(host.querySelector('button[aria-label="Mark as helpful"]')!);
+    expect(localStorage.getItem("tracelens:annotations")).toContain("manual.json");
   });
 });

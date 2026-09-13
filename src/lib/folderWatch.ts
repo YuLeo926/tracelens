@@ -1,4 +1,5 @@
 import type { LiveSource } from "./liveEngine";
+import { createTokenAccumulator, extractTokens } from "../core/folderStats";
 
 // showDirectoryPicker is not in every TS DOM lib version; declare what we use.
 declare global {
@@ -40,6 +41,43 @@ export async function readTail(handle: FileSystemFileHandle, maxBytes = 262144):
   const file = await handle.getFile();
   const start = Math.max(0, file.size - maxBytes);
   return file.slice(start).text();
+}
+
+/** Claude usage is per message, so totals require every record, not just the tail. */
+export async function readTokenTotals(handle: FileSystemFileHandle) {
+  const file = await handle.getFile();
+  if (/\.json$/i.test(handle.name)) return extractTokens(await file.text());
+  const accumulator = createTokenAccumulator();
+  const reader = file.stream().getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  function addLine(line: string): void {
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (Array.isArray(parsed)) parsed.forEach(accumulator.add);
+      else accumulator.add(parsed);
+    } catch {
+      // A live log can end with an incomplete record.
+    }
+  }
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      let start = 0;
+      let end: number;
+      while ((end = pending.indexOf("\n", start)) >= 0) {
+        addLine(pending.slice(start, end));
+        start = end + 1;
+      }
+      pending = pending.slice(start);
+      if (done) break;
+    }
+    if (pending.trim()) addLine(pending);
+    return accumulator.totals();
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /** Read a file's full text by relative path, or null if it can't be read. */
@@ -127,6 +165,14 @@ export function createFolderSource(dir: FileSystemDirectoryHandle): LiveSource {
   const handles = new Map<string, FileSystemFileHandle>();
 
   return {
+    async stat(name) {
+      const handle = handles.get(name) ?? await resolveFileHandle(dir, name);
+      if (!handle) return null;
+      try {
+        const file = await handle.getFile();
+        return { lastModified: file.lastModified, sizeBytes: file.size };
+      } catch { return null; }
+    },
     async listCandidates() {
       const next = new Map<string, FileSystemFileHandle>();
       const meta: Array<{ name: string; lastModified: number; sizeBytes: number }> = [];
@@ -152,7 +198,7 @@ export function createFolderSource(dir: FileSystemDirectoryHandle): LiveSource {
       if (!handle) return null;
       try {
         const file = await handle.getFile();
-        return { lastModified: file.lastModified, text: await file.text() };
+        return { lastModified: file.lastModified, sizeBytes: file.size, text: await file.text() };
       } catch {
         return null;
       }

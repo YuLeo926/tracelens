@@ -1,6 +1,10 @@
+import { SESSION_SIGNALS, type SessionSignal } from "../core/session/types";
+
 export const MAX_SCAN_BYTES = 30 * 1024 * 1024;
 
-const KEY = "tracelens:failed";
+// Parser changes can change error counts even when the source file is unchanged.
+const KEY = "tracelens:failed:v3";
+export interface CachedRunScan { errors: number; signals: SessionSignal[]; }
 
 export function cacheKey(folderScope: string, name: string, lastModified: number, sizeBytes: number): string {
   return `${folderScope}:${name}:${lastModified}:${sizeBytes}`;
@@ -15,20 +19,24 @@ function storageOf(s?: Storage): Storage | null {
   }
 }
 
-export function loadFailedCache(s?: Storage): Record<string, number> {
+export function loadFailedCache(s?: Storage): Record<string, CachedRunScan> {
   const storage = storageOf(s);
   if (!storage) return {};
   try {
     const raw = storage.getItem(KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, number>) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) =>
+      value && typeof value === "object" && Number.isSafeInteger(value.errors) && value.errors >= 0
+      && Array.isArray(value.signals) && value.signals.every((signal: SessionSignal) => SESSION_SIGNALS.includes(signal)),
+    ));
   } catch {
     return {};
   }
 }
 
-export function saveFailedCache(cache: Record<string, number>, s?: Storage): void {
+export function saveFailedCache(cache: Record<string, CachedRunScan>, s?: Storage): void {
   const storage = storageOf(s);
   if (!storage) return;
   try {

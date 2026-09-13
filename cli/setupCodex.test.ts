@@ -27,10 +27,12 @@ const conflict = {
   stderr: "",
 };
 const expectedConnectionMessage = [
-  "TraceLens is connected to Codex.",
-  "Start a new Codex task in the project you want to inspect.",
-  `Ask Codex: "${FIRST_RUN_PROMPT}"`,
-  "Evidence requested through TraceLens tools becomes part of the Codex conversation.",
+  "TraceLens is registered in the shared local MCP configuration for ChatGPT desktop / Codex.",
+  "In the desktop app, enable TraceLens in Settings > MCP servers and select Restart. Start a new local Codex task in the project you want to inspect.",
+  `Ask: "${FIRST_RUN_PROMPT}"`,
+  "Registration alone does not verify that the current chat can call the tools.",
+  "TraceLens reads supported local agent logs, not ordinary ChatGPT chat history.",
+  "Evidence requested through TraceLens tools becomes part of the requesting conversation.",
   `First-run feedback (optional): ${FIRST_RUN_FEEDBACK_URL}`,
 ].join("\n");
 
@@ -136,6 +138,13 @@ describe("setupCodex", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it("provides desktop setup without requiring the Codex CLI", async () => {
+    const result = await setupCodex({ force: false, packageVersion: VERSION, run: throwingRunner(new Error("missing")) });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("ChatGPT desktop Settings > MCP servers");
+    expect(result.message).toContain(`arguments -y ${PACKAGE_NAME}@${VERSION} mcp`);
+  });
+
   it.each([
     "config file not found: C:\\private\\codex\\config.toml",
     "codex: command not found",
@@ -172,7 +181,7 @@ describe("setupCodex", () => {
     await expect(setupCodex({ force: false, packageVersion: VERSION, run })).resolves.toEqual({
       ok: false,
       changed: false,
-      message: `Codex could not be reached. Register TraceLens manually: codex ${expectedAddArgs.join(" ")}`,
+      message: `The Codex CLI could not be reached. In ChatGPT desktop Settings > MCP servers, add a STDIO server named tracelens, command npx, arguments -y ${PACKAGE_NAME}@${VERSION} mcp. Or register with the CLI: codex ${expectedAddArgs.join(" ")}`,
     });
     expect(run).toHaveBeenCalledOnce();
   });

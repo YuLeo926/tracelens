@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { scanTraceFiles, readHead, readTail } from "../lib/folderWatch";
+import { scanTraceFiles, readHead, readTokenTotals } from "../lib/folderWatch";
 import { extractConversationMeta } from "../core/conversationMeta";
-import { startMsOf, modelOf, extractTokens } from "../core/folderStats";
+import { startMsOf, modelOf } from "../core/folderStats";
 import { isTraceFileHead } from "../core/traceSniff";
 
 export interface Conversation {
@@ -25,6 +25,8 @@ interface Result {
   error: boolean;
 }
 
+const REFRESH_MS = 5_000;
+
 /** List the folder's conversations, filling in title/project/tokens progressively. */
 export function useConversations(dir: FileSystemDirectoryHandle | null): Result {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -39,58 +41,73 @@ export function useConversations(dir: FileSystemDirectoryHandle | null): Result 
       return;
     }
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let initial = true;
+    const cache = new Map<string, { lastModified: number; sizeBytes: number; row: Conversation | null }>();
     setLoading(true);
     setError(false);
     setConversations([]);
 
-    (async () => {
-      let files;
+    async function refresh() {
       try {
-        files = await scanTraceFiles(dir);
-      } catch {
-        if (!cancelled) {
-          setError(true);
-          setLoading(false);
-        }
-        return;
-      }
-      if (cancelled) return;
-      for (const f of files) {
+        const files = await scanTraceFiles(dir!);
         if (cancelled) return;
-        let row: Conversation | null = null;
-        try {
-          const head = await readHead(f.handle);
-          if (!isTraceFileHead(f.name, head)) continue;
-          row = {
-            name: f.name,
-            lastModified: f.lastModified,
-            sizeBytes: f.sizeBytes,
-            ...extractConversationMeta(head),
-            startMs: startMsOf(head),
-            model: modelOf(head),
-          };
-          try {
-            const tail = await readTail(f.handle);
-            const tokens = extractTokens(tail);
-            row.tokensIn = tokens?.tokensIn;
-            row.cachedIn = tokens?.cachedIn;
-            row.cacheWriteIn = tokens?.cacheWriteIn;
-            row.cacheWrite1hIn = tokens?.cacheWrite1hIn;
-            row.tokensOut = tokens?.tokensOut;
-          } catch {
-            /* keep metadata-only row */
+        const rows: Conversation[] = [];
+        const names = new Set(files.map((file) => file.name));
+        for (const name of cache.keys()) {
+          if (!names.has(name)) cache.delete(name);
+        }
+        for (const f of files) {
+          if (cancelled) return;
+          const previous = cache.get(f.name);
+          let row: Conversation | null = null;
+          if (previous && previous.lastModified === f.lastModified && previous.sizeBytes === f.sizeBytes) {
+            row = previous.row;
+          } else {
+            cache.delete(f.name);
+            try {
+              const head = await readHead(f.handle);
+              if (cancelled) return;
+              if (isTraceFileHead(f.name, head)) {
+                row = {
+                  name: f.name,
+                  lastModified: f.lastModified,
+                  sizeBytes: f.sizeBytes,
+                  ...extractConversationMeta(head),
+                  startMs: startMsOf(head),
+                  model: modelOf(head),
+                };
+                const tokens = await readTokenTotals(f.handle);
+                if (tokens) Object.assign(row, tokens);
+              }
+              cache.set(f.name, { lastModified: f.lastModified, sizeBytes: f.sizeBytes, row });
+            } catch {
+              // Keep available metadata, but retry failed reads on the next poll.
+            }
           }
-        } catch {
-          continue;
+          if (cancelled) return;
+          if (row) {
+            rows.push(row);
+            if (initial) setConversations([...rows]);
+          }
         }
-        if (cancelled) return;
-        if (row) setConversations((prev) => [...prev, row]);
+        setConversations(rows);
+        setError(false);
+      } catch {
+        if (!cancelled) setError(true);
+      } finally {
+        if (!cancelled) {
+          initial = false;
+          setLoading(false);
+          timer = setTimeout(() => { void refresh(); }, REFRESH_MS);
+        }
       }
-      if (!cancelled) setLoading(false);
-    })();
+    }
+    void refresh();
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [dir]);
 

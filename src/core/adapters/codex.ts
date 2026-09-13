@@ -167,8 +167,7 @@ function outputText(content: unknown): string | undefined {
 
 // A function_call_output's `output` is usually a string, but real sessions also
 // store an object ({ content, success }) or an array of content blocks (e.g. an
-// image/screenshot result). Coerce any shape to a string so the rest of the
-// adapter — including the "Exit code" check — never sees a non-string.
+// image/screenshot result). Preserve readable content independently of status.
 function callOutputText(output: unknown): string | undefined {
   if (typeof output === "string") return output;
   if (Array.isArray(output)) {
@@ -188,6 +187,27 @@ function callOutputText(output: unknown): string | undefined {
     return JSON.stringify(output);
   }
   return undefined;
+}
+
+function callOutputFailed(output: unknown, depth = 0): boolean {
+  if (depth > 8) return false;
+  if (typeof output === "string") {
+    const exit = output.match(/^(?:Exit code:|Process exit code:|Process exited with code)\s*(-?\d+)\b/im);
+    if (exit && Number(exit[1]) !== 0) return true;
+    try {
+      return callOutputFailed(JSON.parse(output), depth + 1);
+    } catch {
+      return false;
+    }
+  }
+  if (Array.isArray(output)) return output.some((block) => callOutputFailed(block, depth + 1));
+  if (!output || typeof output !== "object") return false;
+  const result = output as Record<string, unknown>;
+  const metadata = result.metadata as { exit_code?: unknown } | undefined;
+  const exit = result.exit_code ?? metadata?.exit_code;
+  return result.success === false || result.isError === true
+    || (typeof exit === "number" && Number.isFinite(exit) && exit !== 0)
+    || callOutputFailed(result.content ?? result.text, depth + 1);
 }
 
 // A rollout `reasoning` item's readable text lives only in `summary`
@@ -214,8 +234,8 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
   let firstTs: number | undefined;
   let lastTs = 0;
 
-  const outputs = new Map<string, { output?: string; ts: number }>();
-  const calls: Array<{ callId: string; name?: string; args?: string; ts: number; order: number }> = [];
+  const outputs = new Map<string, { output?: string; failed: boolean; ts: number }>();
+  const calls: Array<{ callId: string; name?: string; args?: string; custom: boolean; ts: number; order: number }> = [];
   const messages: Array<{ text?: string; ts: number; order: number }> = [];
   const reasonings: Array<{ text: string; ts: number; order: number }> = [];
 
@@ -233,10 +253,11 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
       if (typeof total.input_tokens === "number") usageIn = total.input_tokens;
       if (typeof total.output_tokens === "number") usageOut = total.output_tokens;
     } else if (ev.type === "response_item") {
-      if (p.type === "function_call") {
-        calls.push({ callId: String(p.call_id ?? `call-${i}`), name: p.name as string, args: p.arguments as string, ts, order: i });
-      } else if (p.type === "function_call_output") {
-        outputs.set(String(p.call_id), { output: callOutputText(p.output), ts });
+      if (p.type === "function_call" || p.type === "custom_tool_call") {
+        const custom = p.type === "custom_tool_call";
+        calls.push({ callId: String(p.call_id ?? `call-${i}`), name: p.name as string, args: (custom ? p.input : p.arguments) as string, custom, ts, order: i });
+      } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
+        outputs.set(String(p.call_id), { output: callOutputText(p.output), failed: callOutputFailed(p.output), ts });
       } else if (p.type === "message" && p.role === "assistant") {
         messages.push({ text: outputText(p.content), ts, order: i });
       } else if (p.type === "reasoning") {
@@ -254,12 +275,11 @@ function rolloutToLooseSpans(events: RolloutEvent[]): LooseSpan[] {
     let command: string | undefined = c.args;
     try {
       const a = JSON.parse(c.args ?? "") as { command?: unknown };
-      if (typeof a.command === "string") command = a.command;
+      if (!c.custom && typeof a.command === "string") command = a.command;
     } catch {
       /* keep raw arguments */
     }
-    const m = out?.output?.match(/^Exit code:\s*(\d+)/m);
-    const isError = !!m && m[1] !== "0";
+    const isError = out?.failed ?? false;
     spans.push({
       ts: c.ts,
       order: c.order,

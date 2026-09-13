@@ -31,11 +31,20 @@ const formText = readFileSync(
 );
 const form = parse(formText) as IssueForm;
 const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+const packageMetadata = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+const lockfile = JSON.parse(readFileSync(new URL("../../package-lock.json", import.meta.url), "utf8"));
 const byId = new Map<string, FormField>(
   form.body.flatMap((field) => (field.id ? [[field.id, field] as const] : [])),
 );
 
 describe("first-run feedback assets", () => {
+  it("keeps release versions and desktop registration examples aligned", () => {
+    expect(lockfile.version).toBe(packageMetadata.version);
+    expect(lockfile.packages[""].version).toBe(packageMetadata.version);
+    expect(readme).toContain(`\`${packageMetadata.name}@${packageMetadata.version}\``);
+    expect(readme).toContain(`npx ${packageMetadata.name}@${packageMetadata.version} check`);
+  });
+
   it("uses the dedicated GitHub issue form URL", () => {
     expect(FIRST_RUN_FEEDBACK_URL).toBe(
       "https://github.com/YuLeo926/tracelens/issues/new?template=first-run-feedback.yml",
@@ -65,7 +74,10 @@ describe("first-run feedback assets", () => {
   });
 
   it("keeps the self-service quickstart aligned with the product contract", () => {
-    expect(readme).toContain("## Analyze a Codex run");
+    expect(readme).toContain("## Connect ChatGPT desktop / Codex");
+    expect(readme).toContain('<a id="analyze-a-codex-run"></a>');
+    expect(readme).toContain("MCP registration does not grant access to chat history");
+    expect(readme).toContain("A generic answer without tool calls is not a successful connection check");
     expect(readme).toContain("npx @yuleo/tracelens setup codex");
     expect(readme).toContain(FIRST_RUN_PROMPT);
     expect(readme).toContain(FIRST_RUN_FEEDBACK_URL);

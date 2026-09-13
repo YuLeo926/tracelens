@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { copyShareLinkToClipboard } from "./exportActions";
 
 describe("copyShareLinkToClipboard", () => {
+  it("does not put an oversized link onto the clipboard", async () => {
+    const ok = await copyShareLinkToClipboard({ rawSource: "{}", label: "trace", baseUrl: "https://example.test", encode: async () => "x".repeat(64_001), writeText: async () => { throw new Error("Must not write"); } });
+    expect(ok).toBe(false);
+  });
   it("writes the encoded share URL and reports success", async () => {
     let written = "";
     const ok = await copyShareLinkToClipboard({

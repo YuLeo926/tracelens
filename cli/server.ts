@@ -4,6 +4,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { publicEventId } from "../src/core/session/publicIds";
 import { redactText, safeAttributes } from "../src/core/session/sanitize";
+import { redactEvidenceSecrets } from "../src/core/session/secrets";
 import type { RunFacts, SessionSummary } from "../src/core/session/types";
 import type { RunNode } from "../src/core/types";
 import { SessionNotFoundError, type LoadedSession, type SessionRepository } from "./repository";
@@ -59,7 +60,7 @@ function contentType(filePath: string): string {
 }
 
 function sanitizeOutput(value: unknown): unknown {
-  if (typeof value === "string") return redactText(value);
+  if (typeof value === "string") return redactText(redactEvidenceSecrets(value));
   if (Array.isArray(value)) return value.map(sanitizeOutput);
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, nested]) => [redactText(key), sanitizeOutput(nested)]));
@@ -111,17 +112,22 @@ function publicSpan(node: RunNode, sessionId: string): Record<string, unknown> {
 }
 
 function publicSource(loaded: LoadedSession): string {
-  return JSON.stringify({
+  return JSON.stringify(sanitizeOutput({
     spans: [...loaded.trace.byId.values()].map((node) => publicSpan(node, loaded.summary.id)),
-  });
+  }));
 }
 
-function sendJson(response: ServerResponse, status: number, payload: unknown): void {
+function sendJson(response: ServerResponse, status: number, payload: unknown, source?: LoadedSession): void {
   response.writeHead(status, {
     "cache-control": "no-store",
     "content-type": "application/json; charset=utf-8",
   });
-  response.end(JSON.stringify(sanitizeOutput(payload)));
+  const safePayload = sanitizeOutput(payload);
+  // Redact trace fields before serializing: regexes over serialized JSON can
+  // consume escape characters and make the nested source impossible to parse.
+  response.end(JSON.stringify(source === undefined ? safePayload : {
+    ...(safePayload as Record<string, unknown>), source: publicSource(source),
+  }));
 }
 
 function sendNotFound(response: ServerResponse, noStore = false): void {
@@ -272,9 +278,8 @@ export function createViewerService(options: StartViewerOptions): ViewerService 
         const selectedEventId = resolveEventAlias(sessionId, url.searchParams.get("event"));
         sendJson(response, 200, {
           session: publicSummary(loaded.summary),
-          source: publicSource(loaded),
           ...(selectedEventId === undefined ? {} : { selectedEventId: publicEventId(sessionId, selectedEventId) }),
-        });
+        }, loaded);
         resetIdle(instance);
       } catch (error) {
         if (error instanceof SessionNotFoundError) sendJson(response, 404, { error: "Session not found" });

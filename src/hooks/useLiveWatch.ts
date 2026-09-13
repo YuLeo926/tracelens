@@ -16,11 +16,13 @@ export function useLiveWatch({ onUpdate }: Options) {
   const [folderName, setFolderName] = useState("");
   const [currentFile, setCurrentFile] = useState("");
   const timers = useRef<number[]>([]);
+  const generation = useRef(0);
   // Keep the latest onUpdate without restarting the watcher.
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
 
   const stop = useCallback(() => {
+    generation.current++;
     timers.current.forEach((t) => clearInterval(t));
     timers.current = [];
     setState("idle");
@@ -29,6 +31,7 @@ export function useLiveWatch({ onUpdate }: Options) {
   }, []);
 
   const begin = useCallback((dir: FileSystemDirectoryHandle, lockTo?: string) => {
+    const currentGeneration = ++generation.current;
     timers.current.forEach((t) => clearInterval(t));
     timers.current = [];
     setFolderName(dir.name);
@@ -40,15 +43,16 @@ export function useLiveWatch({ onUpdate }: Options) {
       source,
       {
         onUpdate: (u) => {
+          if (generation.current !== currentGeneration) return;
           setCurrentFile(baseName(u.label));
           onUpdateRef.current(u);
         },
-        onStatus: (s) => setState(s),
+        onStatus: (s) => { if (generation.current === currentGeneration) setState(s); },
       },
       lockTo ? { lockTo } : {},
     );
 
-    watcher.init().catch(() => setState("error"));
+    watcher.init().catch(() => { if (generation.current === currentGeneration) setState("error"); });
     timers.current.push(window.setInterval(() => void watcher.fastTick(), FAST_MS));
     timers.current.push(window.setInterval(() => void watcher.slowTick(), SLOW_MS));
   }, []);

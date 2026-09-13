@@ -105,6 +105,16 @@ function viewer(): ViewerService {
 }
 
 describe("TraceLens MCP handlers", () => {
+  it("defaults to compact lists, preserves a full opt-in, and forwards filters", async () => {
+    const test = createRepository();
+    const handlers = createTraceLensHandlers(test.repository, viewer());
+    const compact = await handlers.listSessions({ query: "project", since: 0, until: 10, signal: "tool_errors" });
+    const full = await handlers.listSessions({ detail: "full" });
+    expect(Object.keys(compact.data[0].facts).sort()).toEqual(["signals", "totals"]);
+    expect(compact.data[0].facts.totals).toEqual(full.data[0].facts.totals);
+    expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length / 2);
+    expect(test.repository.list).toHaveBeenCalledWith(expect.objectContaining({ query: "project", since: 0, until: 10, signal: "tool_errors" }));
+  });
   it("enforces handler-side caps and removes prompt-derived summary titles", async () => {
     const test = createRepository();
     const timeline = vi.spyOn(test.loaded.query, "timeline");

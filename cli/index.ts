@@ -15,9 +15,11 @@ import { createViewerService, type StartViewerOptions, type ViewerService } from
 import { setupCodex, type CommandResult, type CommandRunner } from "./setupCodex";
 
 const USAGE = [
-  "Usage: tracelens [open [session-file] | list | mcp | setup codex [--force]]",
+  "Usage: tracelens [open [session-file] | list | mcp | check [--json] | setup codex [--force]]",
   "",
   "Open the newest local session for this project, or select a session with list.",
+  "setup codex registers the shared local MCP server for ChatGPT desktop / Codex.",
+  "Supported local agent logs only; ordinary ChatGPT chat history is not imported.",
 ].join("\n");
 const MAX_DISPLAY_LENGTH = 160;
 const PACKAGE_NAME = packageMetadata.name;
@@ -223,6 +225,17 @@ export async function runCli(argv: string[], deps: CliDependencies): Promise<num
     });
     write(result.ok ? deps.stdout : deps.stderr, result.message);
     return result.ok ? 0 : 1;
+  }
+  if (args.command === "check") {
+    const { runSelfCheck } = await import("./check");
+    const report = await runSelfCheck({ homeDir: deps.homeDir, cwd: deps.cwd, webRoot: deps.webRoot, version: PACKAGE_VERSION, createRepository: deps.createRepository });
+    if (args.json) write(deps.stdout, JSON.stringify(report));
+    else {
+      write(deps.stdout, `TraceLens ${report.version}: ${report.status.toUpperCase()}`);
+      for (const check of report.checks) write(deps.stdout, `[${check.status.toUpperCase()}] ${check.id}: ${check.message}${check.action ? ` ${check.action}` : ""}`);
+      write(deps.stdout, report.scope);
+    }
+    return report.status === "fail" ? 1 : report.status === "warn" ? 2 : 0;
   }
 
   let repository: SessionRepository;

@@ -1,20 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import type { ExportActions } from "./exportActions";
+import { Upload, Link, Download } from "lucide-react";
 
 export function ExportMenu({ actions }: { actions: ExportActions }) {
-  const { onCopyLink, onDownloadJson, canShare } = actions;
+  const { onReviewExport, canShare } = actions;
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
     const onDoc = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") { setOpen(false); trigger.current?.focus(); }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const items = [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+        if (!items.length) return;
+        e.preventDefault();
+        const current = items.indexOf(document.activeElement as HTMLButtonElement);
+        items[(current + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+      }
     };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
@@ -24,26 +32,23 @@ export function ExportMenu({ actions }: { actions: ExportActions }) {
     };
   }, [open]);
 
-  const handleCopy = async () => {
-    const ok = await onCopyLink();
-    setCopied(ok);
-    setCopyFailed(!ok);
-    setTimeout(() => {
-      setCopied(false);
-      setCopyFailed(false);
-    }, 1500);
+  const handleCopy = () => {
+    setOpen(false);
+    trigger.current?.focus();
+    onReviewExport("link");
   };
 
   return (
     <div ref={ref} className="relative shrink-0">
       <button
+        ref={trigger}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="rounded-lg border border-border px-3 py-1.5 text-[12px] text-muted hover:text-text"
+        className="flex min-h-9 items-center gap-1.5 rounded border border-border px-2 text-xs text-muted hover:text-text"
       >
-        ⇪ Export
+        <Upload size={15} /> Export
       </button>
       {open && (
         <div
@@ -58,18 +63,19 @@ export function ExportMenu({ actions }: { actions: ExportActions }) {
             title={canShare ? "" : "Sharing needs a newer browser"}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-text hover:bg-panel-2 disabled:opacity-40"
           >
-            🔗 {copied ? "Copied!" : copyFailed ? "Copy failed" : "Copy share link"}
+            <Link size={15} />Review share link
           </button>
           <button
             type="button"
             role="menuitem"
             onClick={() => {
-              onDownloadJson();
+              trigger.current?.focus();
+              onReviewExport("download");
               setOpen(false);
             }}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-text hover:bg-panel-2"
           >
-            ⬇ Download JSON
+            <Download size={15} />Review JSON export
           </button>
         </div>
       )}

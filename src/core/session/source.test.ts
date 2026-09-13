@@ -19,6 +19,26 @@ const claudeHead = lines(
 );
 
 describe("inspectSessionSource", () => {
+  it("does not treat Claude tool handoff or a new user turn as complete", () => {
+    const assistant = (stop_reason: string) => ({ type: "assistant", message: { role: "assistant", stop_reason } });
+    expect(inspectSessionSource("run.jsonl", claudeHead, lines(assistant("tool_use")))?.lifecycle).toBe("active");
+    expect(inspectSessionSource("run.jsonl", claudeHead, lines(assistant("end_turn")))?.lifecycle).toBe("complete");
+    expect(inspectSessionSource("run.jsonl", claudeHead, lines(assistant("end_turn"), { type: "user", message: { role: "user", content: "Continue" } }))?.lifecycle).toBe("active");
+  });
+  it.each([
+    ["task_started", "active"],
+    ["task_complete", "complete"],
+    ["turn_aborted", "failed"],
+  ])("recognizes rollout lifecycle %s", (type, lifecycle) => {
+    expect(inspectSessionSource("rollout.jsonl", rolloutHead, lines({ type: "event_msg", payload: { type } }))?.lifecycle).toBe(lifecycle);
+  });
+
+  it("uses the latest rollout lifecycle across multiple turns", () => {
+    const tail = lines(...["task_started", "turn_aborted", "task_started", "task_complete", "task_started"]
+      .map((type) => ({ type: "event_msg", payload: { type } })));
+    expect(inspectSessionSource("rollout.jsonl", rolloutHead, tail)?.lifecycle).toBe("active");
+  });
+
   it("identifies Codex exec sessions and their latest lifecycle event", () => {
     expect(inspectSessionSource("run.jsonl", codexHead, '{"type":"turn.completed"}\n')).toMatchObject({
       provider: "codex",

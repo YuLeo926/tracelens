@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedTrace } from "./core/types";
 import { parseTraceText } from "./core/parse";
-import { searchTrace, errorSpanIds, slowestSpanId } from "./core/search";
-import { decodeShare, readShareHash, shareSupported } from "./core/share";
+import { decodeShare, readShareHash } from "./core/share";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { Loader } from "./components/Loader";
 import { AppShell } from "./components/shell/AppShell";
-import { copyShareLinkToClipboard } from "./components/shell/exportActions";
+import { useExportReview } from "./hooks/useExportReview";
+import { useTraceSearch } from "./hooks/useTraceSearch";
+import { browserSessionSummary } from "./core/session/browserSummary";
+import { SharePreviewDialog } from "./components/shell/SharePreviewDialog";
 import { TreeView } from "./components/views/TreeView/TreeView";
 import { FlamegraphView } from "./components/views/FlamegraphView";
 import { DiffView } from "./components/views/DiffView";
@@ -29,7 +31,8 @@ import type { Annotation } from "./core/annotations";
 import { createViewerClient, readViewerToken } from "./core/viewerTransport";
 import type { SessionSummary } from "./core/session/types";
 import { SessionOverview } from "./components/session/SessionOverview";
-import { SessionPicker } from "./components/session/SessionPicker";
+import { SessionPicker, type SessionPickerMemory } from "./components/session/SessionPicker";
+import { EMPTY_SESSION_FILTERS } from "./components/session/SessionFilters";
 import {
   clearSessionNavigation,
   completeSessionRequest,
@@ -53,9 +56,10 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewId>(DEFAULT_VIEW);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [matchIndex, setMatchIndex] = useState(0);
   const [rawSource, setRawSource] = useState("");
+  const { exportReview, closeExport, reviewExport, canShare } = useExportReview(rawSource, setError);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [shareRevision, setShareRevision] = useState(0);
   const [folderDir, setFolderDir] = useState<FileSystemDirectoryHandle | null>(null);
   const [folderView, setFolderView] = useState<"list" | "trace">("list");
   const [following, setFollowing] = useState(true);
@@ -65,7 +69,7 @@ export default function App() {
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const pickerMemory = useRef<SessionPickerMemory>({ filters: EMPTY_SESSION_FILTERS, scrollTop: 0 });
   const sessionOpenerRef = useRef<HTMLButtonElement>(null);
   const sessionNavigationRef = useRef(sessionNavigation);
   const traceRef = useRef(trace);
@@ -92,6 +96,12 @@ export default function App() {
   const dashboard = useMemo(() => aggregateDashboard(convo.conversations, Date.now()), [convo.conversations]);
   const failedScan = useFailedScan(folderDir, convo.conversations);
   const live = folderDir !== null && folderView === "trace";
+  const selectSearchEvent = useCallback((id: string, reveal = false) => {
+    setSelectedId(id); setFollowing(false);
+    if (reveal) { setActiveView("tree"); setMobileDetailOpen(true); }
+  }, []);
+  const { query, search, errors, matchIndex, matchCount, searchInputRef, onQueryChange, clearSearch, stepMatch, jumpNextError, jumpPreviousError, errorPosition, jumpSlowest } = useTraceSearch(trace, selectedId, selectSearchEvent);
+  const overview = useMemo(() => sessionSummary ?? (trace ? browserSessionSummary(trace, label, rawSource) : null), [sessionSummary, trace, label, rawSource]);
 
   const annotationKey = sessionAnnotationKey(localSessionEnabled ? sessionSummary?.id ?? null : null, label);
   const ann = useAnnotations(annotationKey);
@@ -102,6 +112,8 @@ export default function App() {
   );
 
   const onLoad = (t: ParsedTrace, lbl: string, source: string) => {
+    closeExport(); setMobileDetailOpen(false);
+    pickerMemory.current = { filters: EMPTY_SESSION_FILTERS, scrollTop: 0 };
     replaceSessionNavigation(clearSessionNavigation(sessionNavigationRef.current));
     setSessionSummary(null);
     setSessionList([]);
@@ -110,23 +122,23 @@ export default function App() {
     setLabel(lbl);
     setRawSource(source);
     setSelectedId(t.roots[0]?.spanId ?? null);
-    setActiveView(DEFAULT_VIEW);
+    setActiveView("overview");
     setError(null);
-    setQuery("");
-    setMatchIndex(0);
+    clearSearch();
   };
 
   const onLiveUpdate = useCallback(
     (u: LiveUpdate) => {
-      setTrace(u.trace);
       setError(null);
       if (following) {
+        setTrace(u.trace);
         setLabel(u.label);
         setRawSource(u.source);
         setDisplayedFile(u.label);
         setSelectedId(latestSpanId(u.trace.roots));
         setPendingRun(null);
       } else if (u.label === displayedFile) {
+        setTrace(u.trace);
         setLabel(u.label);
         setRawSource(u.source);
       } else {
@@ -140,15 +152,15 @@ export default function App() {
 
   // Clear trace-view state before opening a different conversation.
   const resetTraceState = useCallback(() => {
+    closeExport(); setMobileDetailOpen(false);
     setTrace(null);
     setSelectedId(null);
     setFollowing(true);
     setPendingRun(null);
     setDisplayedFile("");
-    setQuery("");
-    setMatchIndex(0);
-    setActiveView("tree");
-  }, []);
+    clearSearch();
+    setActiveView("overview");
+  }, [clearSearch, closeExport]);
 
   const openFolder = useCallback(async () => {
     const dir = await pickFolder();
@@ -170,6 +182,7 @@ export default function App() {
   const followNewest = useCallback(() => {
     if (!folderDir) return;
     resetTraceState();
+    setActiveView("tree");
     setFolderView("trace");
     liveWatch.followNewest(folderDir);
   }, [folderDir, liveWatch, resetTraceState]);
@@ -180,6 +193,8 @@ export default function App() {
   }, [liveWatch]);
 
   const reset = () => {
+    closeExport(); setMobileDetailOpen(false);
+    pickerMemory.current = { filters: EMPTY_SESSION_FILTERS, scrollTop: 0 };
     replaceSessionNavigation(clearSessionNavigation(sessionNavigationRef.current));
     liveWatch.stop();
     setFolderDir(null);
@@ -189,8 +204,7 @@ export default function App() {
     setError(null);
     setLabel("");
     setActiveView(DEFAULT_VIEW);
-    setQuery("");
-    setMatchIndex(0);
+    clearSearch();
     setRawSource("");
     setFollowing(true);
     setPendingRun(null);
@@ -200,90 +214,6 @@ export default function App() {
     setSessionPickerOpen(false);
     window.history.replaceState(null, "", sessionLocationForReset(window.location.pathname, window.location.search, window.location.hash));
   };
-
-  const search = useMemo(
-    () => (trace ? searchTrace(trace.roots, query) : null),
-    [trace, query],
-  );
-  const errors = useMemo(() => (trace ? errorSpanIds(trace.roots) : []), [trace]);
-  const matchCount = search?.orderedMatchIds.length ?? 0;
-
-  const onQueryChange = useCallback(
-    (q: string) => {
-      setQuery(q);
-      setMatchIndex(0);
-      if (trace) {
-        const res = searchTrace(trace.roots, q);
-        if (res.orderedMatchIds.length > 0) setSelectedId(res.orderedMatchIds[0]);
-      }
-    },
-    [trace],
-  );
-
-  const stepMatch = useCallback(
-    (delta: number) => {
-      const ids = search?.orderedMatchIds ?? [];
-      if (ids.length === 0) return;
-      setMatchIndex((prev) => {
-        const next = (prev + delta + ids.length) % ids.length;
-        setSelectedId(ids[next]);
-        return next;
-      });
-    },
-    [search],
-  );
-
-  const clearSearch = useCallback(() => {
-    setQuery("");
-    setMatchIndex(0);
-  }, []);
-
-  const jumpNextError = useCallback(() => {
-    if (errors.length === 0) return;
-    const cur = errors.indexOf(selectedId ?? "");
-    setSelectedId(errors[(cur + 1) % errors.length]);
-  }, [errors, selectedId]);
-
-  const jumpSlowest = useCallback(() => {
-    if (!trace) return;
-    const id = slowestSpanId(trace.roots);
-    if (id) setSelectedId(id);
-  }, [trace]);
-
-  const canShare = shareSupported();
-
-  const copyShareLink = useCallback(async () => {
-    return copyShareLinkToClipboard({
-      rawSource,
-      label,
-      baseUrl: window.location.origin + window.location.pathname,
-      writeText: (text) => navigator.clipboard.writeText(text),
-    });
-  }, [rawSource, label]);
-
-  const downloadJson = useCallback(() => {
-    if (!rawSource) return;
-    const blob = new Blob([rawSource], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${label || "trace"}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }, [rawSource, label]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   useEffect(() => {
     const route = sessionNavigation.route;
@@ -317,8 +247,8 @@ export default function App() {
         setSessionList(availableSessions);
         setSelectedId(selection.selectedId);
         setActiveView(selection.view);
-        setQuery("");
-        setMatchIndex(0);
+        clearSearch();
+        setMobileDetailOpen(selection.view === "tree");
         replaceSessionNavigation(completeSessionRequest(sessionNavigationRef.current, request, payload.session.id));
         closeSessionPicker();
       })
@@ -338,6 +268,14 @@ export default function App() {
     const onPopState = () => {
       const route = localSessionRoute(window.location.search);
       if (!route) {
+        liveWatch.stop();
+        setFolderDir(null);
+        setFolderView("list");
+        closeExport(); setMobileDetailOpen(false);
+        setSessionPickerOpen(false);
+        setError(null);
+        setRawSource("");
+        setShareRevision((revision) => revision + 1);
         replaceSessionNavigation(clearSessionNavigation(sessionNavigationRef.current));
         setSessionSummary(null);
         setSessionList([]);
@@ -353,16 +291,22 @@ export default function App() {
         replaceSessionNavigation(setLoadedSessionRoute(sessionNavigationRef.current, route));
         setSelectedId(selection.selectedId);
         setActiveView(selection.view);
+        setMobileDetailOpen(selection.view === "tree");
         return;
       }
 
       replaceSessionNavigation(startSessionRequest(sessionNavigationRef.current, route));
     };
+    const onHashChange = () => { if (!localSessionRoute(window.location.search)) onPopState(); };
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [replaceSessionNavigation]);
+    window.addEventListener("hashchange", onHashChange);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("hashchange", onHashChange);
+    };
+  }, [replaceSessionNavigation, liveWatch.stop]);
 
-  // On first load, open a trace embedded in the URL hash (#t=...).
+  // Open shared traces on initial load and same-document history/hash navigation.
   useEffect(() => {
     if (localSessionEnabled) return;
     const token = readShareHash(window.location.hash);
@@ -380,7 +324,7 @@ export default function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localSessionEnabled]);
+  }, [localSessionEnabled, shareRevision]);
 
   const goLive = useCallback(() => {
     setFollowing(true);
@@ -400,6 +344,7 @@ export default function App() {
   const onSpanSelect = useCallback(
     (id: string) => {
       setSelectedId(id);
+      setMobileDetailOpen(true);
       if (live) setFollowing(false);
     },
     [live],
@@ -411,14 +356,17 @@ export default function App() {
 
   const onAnnotationSelect = useCallback(
     (id: string) => {
+      clearSearch();
       setSelectedId(id);
       setActiveView("tree");
+      setMobileDetailOpen(true);
       if (live) setFollowing(false);
     },
-    [live],
+    [live, clearSearch],
   );
 
   const selectSession = useCallback((sessionId: string) => {
+    closeExport(); setMobileDetailOpen(false);
     const route = { sessionId, eventId: null };
     const previous = sessionNavigationRef.current.route;
     if (previous?.sessionId !== sessionId || previous.eventId !== null) {
@@ -435,6 +383,7 @@ export default function App() {
 
   const openOverviewEvent = useCallback((eventId: string) => {
     if (!trace?.byId.has(eventId)) return;
+    clearSearch();
     const route = sessionNavigationRef.current.route;
     if (route?.sessionId) {
       const nextRoute = { ...route, eventId };
@@ -443,16 +392,22 @@ export default function App() {
     }
     setSelectedId(eventId);
     setActiveView("tree");
-  }, [replaceSessionNavigation, trace]);
+    setMobileDetailOpen(true);
+    setFollowing(false);
+  }, [replaceSessionNavigation, trace, clearSearch]);
 
   const selected = selectedId ? (trace?.byId.get(selectedId) ?? null) : null;
+  const backToEvents = () => {
+    setMobileDetailOpen(false);
+    window.requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-span-id]")].find((element) => element.dataset.spanId === selectedId)?.focus());
+  };
   const filtering = query.trim().length > 0;
   const currentMatchId =
     matchCount > 0 ? (search?.orderedMatchIds[matchIndex] ?? null) : null;
 
   return (
     <ThemeProvider>
-      {folderDir && folderView === "list" ? (
+      {folderDir && <div hidden={folderView !== "list"} className="h-full">
         <FolderBrowser
           folderName={folderDir.name}
           conversations={convo.conversations}
@@ -463,8 +418,10 @@ export default function App() {
           onOpen={openConversation}
           onFollowNewest={followNewest}
           onClose={reset}
+          selectedName={displayedFile}
         />
-      ) : !trace ? (
+      </div>}
+      {folderDir && folderView === "list" ? null : !trace ? (
         localSessionEnabled ? (
           <div className="flex h-full items-center justify-center bg-bg p-6">
             <div className="w-full max-w-sm border border-border bg-panel p-4">
@@ -486,13 +443,19 @@ export default function App() {
         <>
         <AppShell
           activeView={activeView}
-          onSelectView={setActiveView}
-          showOverview={sessionSummary !== null}
-          banner={sessionError ? <div role="alert" className="border-b border-border bg-panel-2 px-4 py-2 text-[12px] text-error">{sessionError}</div> : undefined}
+          onSelectView={(view) => { setActiveView(view); setMobileDetailOpen(false); }}
+          showOverview
+          banner={sessionError || error ? <div role="alert" className="border-b border-border bg-panel-2 px-4 py-2 text-[12px] text-error">{sessionError || error}</div> : undefined}
           label={label}
           summary={trace.summary}
           onReset={reset}
-          exportActions={{ onCopyLink: copyShareLink, onDownloadJson: downloadJson, canShare }}
+          onOpenSessions={sessionSummary ? () => setSessionPickerOpen(true) : folderDir ? backToList : undefined}
+          sessionsButtonRef={sessionOpenerRef}
+          selectedEventId={selectedId}
+          mobileDetailOpen={mobileDetailOpen}
+          onBackToEvents={backToEvents}
+          detail={activeView !== "overview" && activeView !== "diff" ? selected ? <SpanDetail node={selected} annotation={ann.annotations[selected.spanId]} onAnnotate={(a: Annotation) => ann.setAnnotation(selected, a)} knownTags={knownTags} /> : <div className="p-6 text-sm text-muted">Select a span to inspect it.</div> : undefined}
+          exportActions={{ onReviewExport: reviewExport, canShare }}
           search={{
             query,
             onQueryChange,
@@ -503,21 +466,21 @@ export default function App() {
             onClear: clearSearch,
             inputRef: searchInputRef,
             onJumpNextError: jumpNextError,
+            onJumpPreviousError: jumpPreviousError,
+            errorPosition,
             onJumpSlowest: jumpSlowest,
             errorCount: errors.length,
             active: activeView === "tree",
           }}
         >
-          {activeView === "overview" && sessionSummary && (
+          {activeView === "overview" && overview && (
             <SessionOverview
-              session={sessionSummary}
+              session={overview}
               onOpenEvent={openOverviewEvent}
-              onOpenPicker={() => setSessionPickerOpen(true)}
-              sessionsButtonRef={sessionOpenerRef}
             />
           )}
           {activeView !== "overview" && (
-          <section className="relative flex min-h-0 flex-col overflow-hidden border-r border-border bg-panel">
+          <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
             {live && (
               <LiveBar
                 state={liveWatch.state}
@@ -536,7 +499,7 @@ export default function App() {
                 matchIds={search?.matchIds ?? null}
                 currentMatchId={currentMatchId}
                 query={query}
-                followId={live && following ? selectedId : null}
+                followId={selectedId}
                 onUserScroll={onUserScroll}
                 annotations={ann.annotations}
               />
@@ -553,20 +516,6 @@ export default function App() {
             )}
           </section>
           )}
-          {activeView !== "overview" && (
-          <aside className="min-h-0 overflow-auto bg-bg">
-            {selected ? (
-              <SpanDetail
-                node={selected}
-                annotation={ann.annotations[selected.spanId]}
-                onAnnotate={(a: Annotation) => ann.setAnnotation(selected, a)}
-                knownTags={knownTags}
-              />
-            ) : (
-              <div className="p-6 text-sm text-muted">Select a span to inspect it.</div>
-            )}
-          </aside>
-          )}
         </AppShell>
         {sessionPickerOpen && sessionSummary && (
           <SessionPicker
@@ -576,10 +525,12 @@ export default function App() {
             error={sessionError}
             onSelect={selectSession}
             onClose={closeSessionPicker}
+            memory={pickerMemory}
           />
         )}
         </>
       )}
+      {exportReview && <SharePreviewDialog key={exportReview.id} preview={exportReview.preview} intent={exportReview.intent} returnFocus={exportReview.returnFocus} onClose={closeExport} />}
     </ThemeProvider>
   );
 }

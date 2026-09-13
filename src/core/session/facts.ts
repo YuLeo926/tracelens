@@ -1,5 +1,6 @@
 import type { ParsedTrace, RunNode } from "../types";
 import { clipText } from "./sanitize";
+import { runSignals } from "./signals";
 import type { EventRef, RepeatedOperationFact, RunFacts, SessionLifecycle } from "./types";
 
 export const FACT_LIST_LIMIT = 10;
@@ -94,16 +95,17 @@ export function buildRunFacts(trace: ParsedTrace, lifecycle: SessionLifecycle): 
       return eventRef(node, Math.min(100, Math.max(0, Math.round(share * 10) / 10)));
     });
   return {
+    signals: runSignals(lifecycle, [...operationGroups.values()].map((group) => group.nodes)),
     lifecycle,
     totals: {
       durationMs: trace.summary.durationMs,
       tokensIn: trace.summary.totalTokensIn,
       tokensOut: trace.summary.totalTokensOut,
-      ...(totalCostUsd > 0 ? { estimatedCostUsd: totalCostUsd } : {}),
+      ...((trace.summary.costedSpanCount ?? 0) > 0 || totalCostUsd > 0 ? { estimatedCostUsd: totalCostUsd } : {}),
       toolCalls: trace.summary.toolCalls,
       errors: trace.summary.errors,
     },
-    errorEvents: events.filter((node) => node.status === "error").sort(byStart).slice(0, FACT_LIST_LIMIT).map(eventRef),
+    errorEvents: events.filter((node) => node.status === "error").sort(byStart).slice(0, FACT_LIST_LIMIT).map((node) => eventRef(node)),
     slowestEvents: [...events].filter((node) => node.durationMs > 0).sort(byDuration).slice(0, FACT_LIST_LIMIT).map((node) => eventRef(node)),
     highestTokenEvents,
     repeatedOperations,

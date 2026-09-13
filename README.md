@@ -13,25 +13,45 @@
 
 ---
 
-## Analyze a Codex run
+<a id="analyze-a-codex-run"></a>
 
-**Prerequisites:** Node.js 20 or newer, the Codex CLI for MCP registration, and at least one local Codex session.
+## Connect ChatGPT desktop / Codex
 
-Connect TraceLens to Codex:
+**Prerequisites:** Node.js 20 or newer, a desktop client with local MCP support, and at least one supported local agent session. The Codex CLI is needed only for the setup command below; desktop settings also support manual registration.
+
+Register TraceLens in the shared local MCP configuration:
 
 ```bash
 npx @yuleo/tracelens setup codex
 ```
 
-Start a new Codex CLI or Desktop task that can access the registered MCP server, in the project you want to inspect, then ask:
+The command remains `setup codex` for compatibility. The current ChatGPT desktop app, Codex CLI and IDE extension share MCP configuration on the same Codex host. In the desktop app, open **Settings > MCP servers**, enable TraceLens and select **Restart**. Start a new **local Codex task** in the project you want to inspect, check `/mcp` for TraceLens, then ask:
 
 > Use TraceLens to analyze the most recent abnormal run in this project.
 
-TraceLens ranks recent sessions for the current project and gives Codex bounded, read-only evidence. No separate model API or TraceLens account is required.
+TraceLens ranks recent sessions for the current project and gives the calling agent bounded, read-only evidence. No separate model API or TraceLens account is required. Registration does not prove that the current chat can call the tools; complete the workflow below to verify the client.
+
+**Desktop setup without the Codex CLI:** in **Settings > MCP servers > Add server**, enter name `tracelens`, transport **STDIO**, command `npx`, and arguments `-y`, `@yuleo/tracelens@0.2.3`, `mcp` as separate arguments. Save, enable and restart the server. Do not replace an existing registration without checking what it runs.
+
+**Testing a source checkout:** run `npm run build`, then register `node` with the absolute path to this checkout's `dist-cli/index.js` followed by `mcp`, instead of the npm command. This uses the local build, not the npm package. Rebuild after code changes and restart the MCP server. Moving this checkout requires updating that path.
+
+This integration follows the [official local MCP documentation](https://learn.chatgpt.com/docs/extend/mcp). ChatGPT web and hosted tasks do not read a local Codex configuration file; this setup does not turn TraceLens into a public or remote MCP service.
+
+### What is supported
+
+| Capability | Status |
+| --- | --- |
+| Find and inspect local Codex / Claude Code sessions | Supported through the existing local MCP server |
+| Open cited events in the local browser viewer | Supported on the machine running TraceLens |
+| Use another GPT model to analyze the same logs | The tool protocol is model-independent; log-format support and model-price coverage are separate |
+| Automatically read ordinary ChatGPT Chat / Work conversation history | Not implemented; MCP registration does not grant access to chat history |
+| Import a ChatGPT account history export | Not implemented; do not treat it as a supported agent trace |
+
+The desktop application name does not determine log compatibility. TraceLens currently discovers `~/.codex/sessions` and `~/.claude/projects`; it does not scrape the ChatGPT desktop app, read login credentials, or retrieve cloud conversation history. New desktop clients still need an actual tool-call verification. Missing tokens or unsupported pricing must not be interpreted as zero cost.
 
 ### What success looks like
 
-Codex should identify the selected session, explain what happened, and cite one or more TraceLens event IDs. You can ask it to open the cited evidence in the local viewer, or run the viewer directly:
+The agent should call `list_sessions`, fetch `get_session_overview`, inspect relevant events with `get_event_detail`, explain what happened, and cite TraceLens event IDs. Then ask it to call `get_viewer_link` for a cited event and open that link. Confirm that the viewer shows the same session and event. A generic answer without tool calls is not a successful connection check. You can also run the viewer directly:
 
 ```bash
 npx @yuleo/tracelens
@@ -41,26 +61,65 @@ An incomplete log may support observations without proving a root cause. Treat t
 
 [Share first-run feedback](https://github.com/YuLeo926/tracelens/issues/new?template=first-run-feedback.yml) after trying the flow. The form is optional and public; do not include logs, paths, secrets, private code, prompts, or conversation contents.
 
+### Self-service local check
+
+With version 0.2.3 or newer:
+
+```bash
+npx @yuleo/tracelens@0.2.3 check
+npx @yuleo/tracelens@0.2.3 check --json
+```
+
+In a source checkout, build once and run:
+
+```bash
+npm run build
+node dist-cli/index.js check
+node dist-cli/index.js check --json
+```
+
+The check verifies installed viewer assets, local session discovery, a synthetic trace, actual MCP stdio requests, and authenticated loopback evidence access. It does not upload logs, call a model, or modify configuration. It does **not** verify Codex's saved MCP registration or whether a Codex task can call the tools; verify that separately in a new task. Reports contain no session content or local paths. Exit codes: `0` passed, `2` warning (for example, no readable sessions), `1` failed. Version 0.2.2 does not include this command.
+
 ### First-run troubleshooting
 
-- **TraceLens tools are missing:** start a new Codex task after setup.
+- **TraceLens tools are missing:** check **Settings > MCP servers** on the intended local host, enable TraceLens, select **Restart**, and start a new local Codex task. Check `/mcp`; an already-running conversation may not acquire newly registered tools.
 - **No supported sessions were found:** run Codex in the project first, or open a supported file with `npx @yuleo/tracelens open <file>`.
 - **The wrong project session was selected:** start the Codex task from the intended project directory and ask TraceLens to list the candidate sessions before choosing one.
 - **A different TraceLens registration already exists:** inspect it with `codex mcp get tracelens --json`; replace it only when intended with `npx @yuleo/tracelens setup codex --force`.
 - **You want to verify the evidence:** ask Codex for a TraceLens viewer link or run `npx @yuleo/tracelens list`.
 
-Setup is idempotent and pins the installed TraceLens version. Evidence requested through MCP enters the current Codex conversation and follows that conversation's data handling. Log text is treated as untrusted evidence and is never executed by TraceLens.
+Setup is idempotent and pins the installed TraceLens version. Evidence requested through MCP enters the requesting ChatGPT / Codex conversation and follows that conversation's data handling. Log text is treated as untrusted evidence and is never executed by TraceLens.
 
 | Tool | Evidence returned |
 | --- | --- |
-| `list_sessions` | Recent supported sessions, ranked for the current project by default, with metadata and aggregate facts. |
+| `list_sessions` | Compact metadata, totals, and observed signals by default. Detailed evidence is fetched on demand. |
 | `get_session_overview` | Lifecycle, totals, and bounded lists of errors, slow events, token-heavy events, and repeated operations. |
 | `get_session_timeline` | A chronological, filterable page of event references with short snippets. |
 | `search_session` | Bounded matches across normalized event names, inputs, outputs, status messages, and selected attributes. |
 | `get_event_detail` | One event's normalized metadata and bounded input, output, status, token, and attribute evidence. |
 | `get_viewer_link` | An authenticated loopback link to the selected session and optional event; it does not open a browser. |
 
-TraceLens has no model API and does not upload data independently. Evidence returned to Codex through MCP enters the Codex conversation and is subject to that conversation's data handling. Log text is treated as untrusted evidence: TraceLens does not execute commands, follow URLs, or change files based on instructions found in a run.
+TraceLens has no model API and does not upload data independently. Evidence returned through MCP enters the requesting ChatGPT / Codex conversation and is subject to that conversation's data handling. Log text is treated as untrusted evidence: TraceLens does not execute commands, follow URLs, or change files based on instructions found in a run.
+
+`list_sessions` accepts `query` (title/project/provider metadata, not log-body search), inclusive `since`/`until` (modified time in epoch milliseconds), and `signal`: `tool_errors`, `repeated_failures`, `recovered`, `stopped`, `active`, or `unknown`. Filters run before the result limit. Use `detail: "full"` for the previous detailed list shape, or `get_session_overview` for one candidate. Filtering never silently switches away from the current project when that project has sessions.
+
+Browser lists support keyword, local-calendar modified dates, and observed-signal filters. The local viewer's session picker filters its loaded recent candidates; MCP filters can search the broader discovered set. A retry succeeding means an observed successful call after failure of the same operation, not proof that the whole task was fixed. Browser signal scanning skips files over 30 MB; unscanned files are marked "Not analyzed", not successful.
+
+### Costs and sharing
+
+The folder dashboard separates usage priced with the bundled model table, generic fallback-rate estimates, and sessions with missing usage (excluded from cost totals, not counted as free). Model-table matches are still estimates, not invoices: rates can age, logs may omit usage, and a session may switch models. This optimization does not refresh the pricing table.
+
+Share links and trace JSON downloads now open a review dialog first. The export is a normalized snapshot with remapped event IDs, best-effort masking of common credentials and absolute paths, and only supported primitive attributes. It is not a lossless raw-log export. Private code and conversation prose may remain; review the exact content and confirm before copying or downloading. The original file is never changed. Anyone with a share link can read the embedded export. Oversized links are rejected; use the reviewed JSON download instead. Annotation exports are separate and should also be checked for private notes.
+
+### Browser workflow
+
+- Choose a trace file using the import button, drag a file onto the page, or open a local folder. Folders start on the conversation list; the folder-wide dashboard remains in **Overview**.
+- Imported files and selected sessions open the same run overview. Select an error, slow event, or token-heavy event to inspect its evidence. **Follow newest** still opens the live call tree.
+- **Sessions** returns to the folder list or local session picker, retaining filters and scroll position. Opening a new source resets this context.
+- Event details show errors, input, and output first. **Annotations** is a separate disclosure below the evidence. On narrow screens, details use the full width; **Back to events** returns to the selected row.
+- Export review offers readable **Events** and **Complete JSON** views. Filtering the preview does not filter the export. Every export requires a fresh confirmation of the entire frozen snapshot.
+
+Live watching checks modification time and file size before reading content: unchanged polls do not reread or reparse the log. Changed files still receive a full parse. Incremental parsing and list virtualization remain future work.
 
 ## Why
 
@@ -76,7 +135,7 @@ The heavyweight observability platforms can show you this — but most of them w
 - **Call tree with an inline waterfall** — every span is colored by kind (LLM, tool, retriever, agent…) and shows where in the run it happened and how long it took.
 - **Model thinking, surfaced** — Claude Code `thinking` blocks and Codex `reasoning` summaries show up as their own rows in the tree, right where they happened; click one to read the model's recorded thought process in full. They're searchable and annotatable like any other span — rate the *thinking*, not just the answer, when building eval sets. (This shows the thinking text your logs already record; encrypted thinking is marked as such, and it's not a window into model internals.)
 - **Live tail + conversation browser (Chromium)** — point it at a local agent-log folder (e.g. `~/.codex/sessions` or `~/.claude/projects`) and **browse its conversations**, each labeled by its first message and project (read from the file's head, so it's fast even with huge logs), newest first and filterable. Open any one to read it — watching **live** if it's still being written — or hit **Follow newest** to track the active run as it unfolds, auto-jumping to the latest step and pausing the moment you start inspecting (a "back to live" pill catches you up). Files are read straight from disk in your browser; nothing is uploaded.
-- **Folder overview dashboard** — opening a folder also gives you a bird's-eye **Overview** tab: total conversations, token usage with a cache-aware **rough cost estimate** (per-model rates for GPT-5.x / Codex / Claude), a 14-day activity timeline, a breakdown by project, and **runs with errors** (counted, newest first — so a real failure stands out from the routine non-zero exit). All computed locally from file heads/tails; non-trace files are sniffed out so stray `.json` doesn't pollute the counts.
+- **Folder overview dashboard** — opening a folder also gives you a bird's-eye **Overview** tab: total conversations, token usage with a cache-aware **rough cost estimate** (per-model rates for GPT-5.x / Codex / Claude), a 14-day activity timeline, a breakdown by project, and **runs with errors**. Usage is streamed from complete JSONL files and cached by file metadata; non-trace files are sniffed out so stray `.json` does not pollute the counts.
 - **Search + jump** — filter the tree as you type (`⌘K`) across names, models, input/output, and jump straight to the next error or the slowest span.
 - **Flamegraph** — see where the time and the money went, weighted by duration, tokens, or cost.
 - **Diff two runs** — load a second trace and compare: a summary delta bar (regressions in red, improvements in green) over a merged tree that flags what changed, was added, or removed.

@@ -1,4 +1,6 @@
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { X } from "lucide-react";
+import { EMPTY_SESSION_FILTERS, SessionFilters, sessionDateRange, type SessionFilterValues } from "./SessionFilters";
 import { formatRelativeTime, formatTokens } from "../../core/format";
 import { sessionDisplayText } from "../../core/session/display";
 import type { ProjectMatch, SessionSummary } from "../../core/session/types";
@@ -23,6 +25,8 @@ export function rankedSessions(sessions: SessionSummary[]): SessionSummary[] {
   return [...sessions].sort((left, right) => MATCH_RANK[left.match] - MATCH_RANK[right.match] || right.modifiedAt - left.modifiedAt || (right.startMs ?? Number.NEGATIVE_INFINITY) - (left.startMs ?? Number.NEGATIVE_INFINITY) || left.id.localeCompare(right.id));
 }
 
+export interface SessionPickerMemory { filters: SessionFilterValues; scrollTop: number; }
+
 interface Props {
   sessions: SessionSummary[];
   activeId: string;
@@ -30,9 +34,18 @@ interface Props {
   error: string | null;
   onSelect: (sessionId: string) => void;
   onClose: () => void;
+  memory?: { current: SessionPickerMemory };
 }
 
-export function SessionPicker({ sessions, activeId, loading, error, onSelect, onClose }: Props) {
+export function SessionPicker({ sessions, activeId, loading, error, onSelect, onClose, memory }: Props) {
+  const [filters, setFilters] = useState(memory?.current.filters ?? EMPTY_SESSION_FILTERS);
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (listRef.current) listRef.current.scrollTop = memory?.current.scrollTop ?? 0; }, [memory]);
+  const changeFilters = (values: SessionFilterValues) => {
+    setFilters(values);
+    if (memory) memory.current = { filters: values, scrollTop: 0 };
+    if (listRef.current) listRef.current.scrollTop = 0;
+  };
   const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
@@ -40,7 +53,12 @@ export function SessionPicker({ sessions, activeId, loading, error, onSelect, on
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const rows = rankedSessions(sessions);
+  const range = sessionDateRange(filters);
+  const rows = rankedSessions(sessions).filter((session) => !range.invalid
+    && (range.since === undefined || session.modifiedAt >= range.since)
+    && (range.until === undefined || session.modifiedAt <= range.until)
+    && (!filters.signal || session.facts.signals?.includes(filters.signal))
+    && [session.title, session.project, session.provider].some((text) => text?.toLowerCase().includes(filters.query.trim().toLowerCase())));
   const now = Date.now();
   const trapFocus = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key !== "Tab") return;
@@ -54,9 +72,10 @@ export function SessionPicker({ sessions, activeId, loading, error, onSelect, on
   return (
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-text/20 p-2" role="presentation" onMouseDown={onClose}>
       <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="session-picker-title" aria-busy={loading} className="flex max-h-[min(40rem,calc(100vh-1rem))] w-[min(44rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-lg" onMouseDown={(event) => event.stopPropagation()} onKeyDown={trapFocus}>
-        <header className="flex items-center justify-between border-b border-border px-4 py-3"><h2 id="session-picker-title" className="text-sm font-semibold text-text">Sessions</h2><button type="button" autoFocus onClick={onClose} aria-label="Close session picker" title="Close" className="h-7 w-7 rounded text-[16px] text-muted hover:bg-panel-2 hover:text-text">x</button></header>
+        <header className="flex items-center justify-between border-b border-border px-4 py-3"><h2 id="session-picker-title" className="text-sm font-semibold text-text">Sessions <span className="font-normal text-muted">({sessions.length} loaded)</span></h2><button type="button" autoFocus onClick={onClose} aria-label="Close session picker" title="Close" className="icon-button"><X size={18} /></button></header>
         {(loading || error) && <div className="border-b border-border bg-panel-2 px-4 py-2 text-[12px] text-muted">{loading ? "Loading session..." : <span role="alert" className="text-error">{error}</span>}</div>}
-        <div className="min-h-0 overflow-auto">
+        <SessionFilters values={filters} onChange={changeFilters} />
+        <div ref={listRef} onScroll={(event) => { if (memory) memory.current.scrollTop = event.currentTarget.scrollTop; }} className="min-h-0 overflow-auto">
           {rows.map((session) => {
             const active = session.id === activeId;
             const facts = session.facts.totals;
@@ -65,7 +84,7 @@ export function SessionPicker({ sessions, activeId, loading, error, onSelect, on
               <span className="min-w-0 flex-1"><span data-session-title="" className="block break-all text-[13px] leading-5 text-text">{sessionTitle(session)}</span><span className="mt-0.5 flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted"><span className="capitalize">{session.provider}</span><span data-session-project="" className="min-w-0 max-w-full break-all">{sessionProject(session)}</span><span>{formatRelativeTime(session.modifiedAt, now)}</span><span className="capitalize">{session.lifecycle}</span><span>{facts.errors} errors</span><span className="mono">{formatTokens(facts.tokensIn)} / {formatTokens(facts.tokensOut)}</span></span></span>
             </button>;
           })}
-          {rows.length === 0 && <div className="px-4 py-5 text-sm text-muted">No sessions are available.</div>}
+          {rows.length === 0 && <div className="px-4 py-5 text-sm text-muted">{sessions.length ? "No sessions match the current filters." : "No sessions are available."}</div>}
         </div>
       </section>
     </div>

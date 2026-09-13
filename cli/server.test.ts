@@ -87,6 +87,31 @@ afterEach(async () => {
 });
 
 describe("createViewerService", () => {
+  it("preserves serialized trace JSON while masking quoted paths and credentials", async () => {
+    const repo = repository();
+    const loaded = await repo.load("session-1");
+    const node = loaded.trace.roots[0];
+    node.input = 'Run "C:\\private\\tool.exe" with token=private-token-value';
+    node.output = '{"file":"/var/private/output.json","password":"private-password"}';
+    node.attributes.note = String.raw`literal \"quoted\" expression`;
+    const service = createViewerService({ repository: repo, webRoot: await createWebRoot(), token });
+    try {
+      const link = await service.getLink("session-1");
+      const loadedResponse = await get(serverOrigin(link), "/api/sessions/session-1", authHeaders());
+      expect(loadedResponse.status).toBe(200);
+      const payload = JSON.parse(loadedResponse.body);
+      const trace = parseTraceText(payload.source);
+      expect(trace.byId.size).toBe(1);
+      const event = trace.byId.get(publicEventId("session-1", "event-1"))!;
+      expect(event.input).toContain("<absolute-path>");
+      expect(event.input).toContain("[REDACTED]");
+      expect(payload.source).not.toContain("private-token-value");
+      expect(payload.source).not.toContain("private-password");
+      expect(payload.source).not.toContain("/var/private");
+      expect(payload.source).not.toContain("server");
+      expect(node.input).toContain("private-token-value");
+    } finally { await service.close(); }
+  });
   it("serves authenticated JSON without CORS and returns encoded reusable viewer links", async () => {
     const service = createViewerService({ repository: repository(), webRoot: await createWebRoot(), token });
     const first = await service.getLink("session / one", "event & one");

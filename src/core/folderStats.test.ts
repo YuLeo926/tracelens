@@ -4,6 +4,22 @@ import { extractTokens, startMsOf, modelOf, estimateCostUsd, aggregateDashboard,
 const lines = (...objs: unknown[]) => objs.map((o) => JSON.stringify(o)).join("\n");
 
 describe("extractTokens", () => {
+  it("ignores token notifications without cumulative usage without erasing valid totals", () => {
+    const empty = [null, {}, { total_token_usage: null }, { total_token_usage: {} }]
+      .map((info) => ({ type: "event_msg", payload: { type: "token_count", info } }));
+    expect(extractTokens(lines(...empty))).toBeNull();
+    expect(extractTokens(lines(
+      { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 70, output_tokens: 20 } } } },
+      ...empty,
+    ))).toEqual({ tokensIn: 100, cachedIn: 70, tokensOut: 20 });
+  });
+
+  it("reads pretty-printed JSON arrays and ignores non-record JSON values", () => {
+    expect(extractTokens(JSON.stringify([
+      null, false, { response: { usage: { input_tokens: 12, output_tokens: 3 } } },
+    ], null, 2))).toMatchObject({ tokensIn: 12, tokensOut: 3 });
+  });
+
   it("sums the LAST token_count event in the tail", () => {
     const tail = lines(
       { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 10, output_tokens: 2 } } } },
@@ -88,6 +104,12 @@ describe("startMsOf / modelOf", () => {
 });
 
 describe("estimateCostUsd", () => {
+  it.each(["claude-sonnet-4-5", "claude-sonnet-4-5-20250929", "claude-3-5-sonnet-20241022", "claude-sonnet-4-20250514"])(
+    "does not apply Sonnet 5 promotional pricing to %s", (model) => {
+      expect(estimateCostUsd(1_000_000, 1_000_000, 0, model, 0, 0, Date.parse("2026-08-01"))).toBeCloseTo(18);
+    },
+  );
+
   it("uses current OpenAI model-specific rates instead of a broad GPT-5 bucket", () => {
     expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.5")).toBeCloseTo(35);
     expect(estimateCostUsd(1_000_000, 1_000_000, 0, "gpt-5.4")).toBeCloseTo(17.5);

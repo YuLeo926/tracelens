@@ -11,6 +11,8 @@ export interface SearchControls {
   onClear: () => void;
   inputRef: RefObject<HTMLInputElement>;
   onJumpNextError: () => void;
+  onJumpPreviousError?: () => void;
+  errorPosition?: number;
   onJumpSlowest: () => void;
   errorCount: number;
   active: boolean; // controls are enabled only on the tree view

@@ -85,6 +85,44 @@ const ROLLOUT = [
 ];
 
 describe("codexAdapter — session rollout", () => {
+  it.each([
+    "Process exited with code 1\nOutput:\nfailed",
+    "Process exit code: -1\nOutput:\nfailed",
+    { content: "Failed", success: false },
+    { content: [{ type: "text", text: "Failed" }], isError: true },
+    { exit_code: 2, output: "Failed" },
+    JSON.stringify({ output: "Failed", metadata: { exit_code: 1 } }),
+  ])("recognizes a failed tool result: %j", (output) => {
+    const trace = parseTrace([
+      ROLLOUT[0], ROLLOUT[2],
+      { ...ROLLOUT[3], payload: { type: "function_call_output", call_id: "call_1", output } },
+    ]);
+    expect(trace.byId.get("call_1")!.status).toBe("error");
+    expect(trace.summary.errors).toBe(1);
+  });
+
+  it.each(["Process exited with code 0", { content: "Done", success: true }, "There were 10 errors in the previous run"])(
+    "does not invent failures from successful or ordinary tool output: %j", (output) => {
+      const trace = parseTrace([
+        ROLLOUT[0], ROLLOUT[2],
+        { ...ROLLOUT[3], payload: { type: "function_call_output", call_id: "call_1", output } },
+      ]);
+      expect(trace.summary.errors).toBe(0);
+    },
+  );
+
+  it.each(["*** Begin Patch\n*** End Patch", '{"command":"preserve this JSON as raw custom input"}'])(
+    "retains custom tool calls, their raw input, result, and duration: %s", (input) => {
+    const trace = parseTrace([
+      ROLLOUT[0],
+      { ...ROLLOUT[2], payload: { type: "custom_tool_call", name: "apply_patch", call_id: "patch", input } },
+      { ...ROLLOUT[3], payload: { type: "custom_tool_call_output", call_id: "patch", output: { content: "Patch failed", success: false } } },
+    ]);
+    expect(trace.summary.toolCalls).toBe(1);
+    expect(trace.byId.get("patch")).toMatchObject({ name: "apply_patch", kind: "tool", input, output: "Patch failed", status: "error", durationMs: 368 });
+    },
+  );
+
   it("detects the rollout shape", () => {
     expect(codexAdapter.detect(ROLLOUT)).toBe(true);
   });

@@ -2,8 +2,7 @@ import { encodeShare, shareUrl, type SharePayload } from "../../core/share";
 
 /** The export actions the top-bar menu needs, provided by App. */
 export interface ExportActions {
-  onCopyLink: () => boolean | Promise<boolean>;
-  onDownloadJson: () => void;
+  onReviewExport: (intent: "link" | "download") => void;
   canShare: boolean; // false on browsers without CompressionStream
 }
 
@@ -25,6 +24,7 @@ export async function copyShareLinkToClipboard({
   if (!rawSource) return false;
   try {
     const encoded = await encode({ name: label, source: rawSource });
+    if (encoded.length > 64_000) return false;
     await writeText(shareUrl(baseUrl, encoded));
     return true;
   } catch {

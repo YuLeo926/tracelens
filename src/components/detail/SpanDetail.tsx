@@ -2,6 +2,8 @@ import type { RunNode } from "../../core/types";
 import type { Annotation, StoredAnnotation } from "../../core/annotations";
 import { KindBadge } from "./KindBadge";
 import { formatDuration, formatTokens, formatCost, formatClock } from "../../core/format";
+import { ThumbsDown, ThumbsUp } from "lucide-react";
+import { EvidenceText } from "./EvidenceText";
 
 const HANDLED_KEYS = [
   "input.value",
@@ -13,9 +15,9 @@ const HANDLED_KEYS = [
 
 function Field({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wider text-faint">{label}</span>
-      <span className={`mono break-words text-[13px] ${accent ? "text-accent-strong" : "text-text"}`}>
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-[11px] text-muted">{label}</span>
+      <span className={`mono evidence-text text-[13px] ${accent ? "text-accent-strong" : "text-text"}`}>
         {value}
       </span>
     </div>
@@ -24,14 +26,7 @@ function Field({ label, value, accent }: { label: string; value: string; accent?
 
 function Block({ label, body }: { label: string; body?: string }) {
   if (!body) return null;
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-[10px] uppercase tracking-wider text-faint">{label}</span>
-      <pre className="mono max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-panel p-3 text-[12.5px] leading-relaxed text-text">
-        {body}
-      </pre>
-    </div>
-  );
+  return <EvidenceText label={label} body={body} />;
 }
 
 function AnnotationControl({
@@ -49,14 +44,14 @@ function AnnotationControl({
     `rounded border px-2 py-1 text-sm ${active ? "border-accent bg-elev" : "border-border hover:border-accent"}`;
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-panel p-3">
-      <span className="text-[10px] uppercase tracking-wider text-faint">Annotation</span>
+    <div className="flex flex-col gap-2 py-3">
       <div className="flex gap-2">
-        <button type="button" className={btn(verdict === "good")} onClick={() => update({ verdict: verdict === "good" ? undefined : "good" })}>👍</button>
-        <button type="button" className={btn(verdict === "bad")} onClick={() => update({ verdict: verdict === "bad" ? undefined : "bad" })}>👎</button>
+        <button type="button" title="Mark as helpful" aria-label="Mark as helpful" aria-pressed={verdict === "good"} className={btn(verdict === "good")} onClick={() => update({ verdict: verdict === "good" ? undefined : "good" })}><ThumbsUp size={16} /></button>
+        <button type="button" title="Mark as unhelpful" aria-label="Mark as unhelpful" aria-pressed={verdict === "bad"} className={btn(verdict === "bad")} onClick={() => update({ verdict: verdict === "bad" ? undefined : "bad" })}><ThumbsDown size={16} /></button>
       </div>
       <input
         list="tracelens-ann-tags"
+        aria-label="Annotation tag"
         value={tag}
         onChange={(e) => update({ tag: e.target.value })}
         placeholder="tag (e.g. hallucination)"
@@ -66,6 +61,7 @@ function AnnotationControl({
         {knownTags.map((t) => <option key={t} value={t} />)}
       </datalist>
       <textarea
+        aria-label="Annotation note"
         value={note}
         onChange={(e) => update({ note: e.target.value })}
         placeholder="note…"
@@ -88,7 +84,7 @@ export function SpanDetail({
   const isError = node.status === "error";
 
   return (
-    <div className="flex flex-col gap-5 p-5">
+    <div className="flex min-w-0 flex-col gap-5 p-4 lg:p-5">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <KindBadge kind={node.kind} />
@@ -104,16 +100,12 @@ export function SpanDetail({
             </span>
           )}
         </div>
-        <h2 className="text-base font-semibold text-text">{node.name}</h2>
+        <h2 className="evidence-text text-base font-semibold text-text">{node.name}</h2>
       </div>
-
-      {onAnnotate && (
-        <AnnotationControl annotation={annotation} onAnnotate={onAnnotate} knownTags={knownTags} />
-      )}
 
       {isError && node.statusMessage && (
         <div
-          className="rounded-lg p-3 text-sm text-error"
+          className="evidence-text rounded border-l-2 p-3 text-sm leading-relaxed text-error"
           style={{
             background: "color-mix(in srgb, var(--error) 10%, transparent)",
             border: "1px solid color-mix(in srgb, var(--error) 35%, transparent)",
@@ -123,26 +115,26 @@ export function SpanDetail({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <Block label="Input" body={node.input} />
+      <Block label="Output" body={node.output} />
+
+      <div className="grid min-w-0 grid-cols-2 gap-4 border-t border-border pt-4">
         <Field label="Duration" value={formatDuration(node.durationMs)} />
         <Field label="Started" value={formatClock(node.startMs)} />
         {node.model && <Field label="Model" value={node.model} />}
-        {node.tokensIn || node.tokensOut ? (
+        {node.tokensIn !== undefined || node.tokensOut !== undefined ? (
           <Field
             label="Tokens in / out"
             value={`${formatTokens(node.tokensIn)} / ${formatTokens(node.tokensOut)}`}
           />
         ) : null}
-        {node.costUsd ? <Field label="Cost" value={formatCost(node.costUsd)} accent /> : null}
+        {node.costUsd !== undefined ? <Field label="Cost subtotal" value={formatCost(node.costUsd)} accent /> : null}
         <Field label="Span ID" value={node.spanId} />
       </div>
 
-      <Block label="Input" body={node.input} />
-      <Block label="Output" body={node.output} />
-
       {otherAttrs.length > 0 && (
         <details>
-          <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-faint">
+          <summary className="cursor-pointer select-none text-xs text-muted">
             Raw attributes ({otherAttrs.length})
           </summary>
           <pre className="mono mt-2 max-h-72 overflow-auto rounded-lg border border-border bg-panel p-3 text-[12px] text-muted">
@@ -150,6 +142,10 @@ export function SpanDetail({
           </pre>
         </details>
       )}
+      {onAnnotate && <details className="border-t border-border pt-3">
+        <summary className="cursor-pointer text-xs font-semibold text-muted">Annotations{annotation ? " (saved)" : ""}</summary>
+        <AnnotationControl annotation={annotation} onAnnotate={onAnnotate} knownTags={knownTags} />
+      </details>}
     </div>
   );
 }

@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { FolderOpen, Search, Plug } from "lucide-react";
 import { FIRST_RUN_FEEDBACK_URL } from "../core/firstRun";
 import { parseTraceText } from "../core/parse";
 import type { ParsedTrace } from "../core/types";
@@ -23,6 +24,7 @@ const SAMPLES = [
 
 export function Loader({ onLoad, onError, error, onStartLive }: Props) {
   const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const ingest = useCallback(
     (text: string, label: string) => {
@@ -69,10 +71,7 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
             className="flex h-7 w-7 items-center justify-center rounded-lg"
             style={{ background: "linear-gradient(135deg,var(--kind-agent),var(--kind-retriever))" }}
           >
-            <svg width="15" height="15" viewBox="0 0 32 32" aria-hidden="true">
-              <circle cx="14" cy="14" r="8.5" fill="none" stroke="#fff" strokeWidth="2.6" />
-              <line x1="20" y1="20" x2="26" y2="26" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" />
-            </svg>
+            <Search size={17} aria-hidden="true" className="text-white" />
           </div>
           <span className="wordmark text-lg text-text">tracelens</span>
         </div>
@@ -88,7 +87,7 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
         </div>
       )}
 
-      <div className="mx-auto flex max-w-xl flex-1 flex-col items-center justify-center gap-8 px-6 py-16 text-center">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-6 px-6 py-8 text-center">
         <div className="flex flex-col gap-3">
           <h1 className="text-2xl text-text">Open an agent run.</h1>
           <p className="text-sm leading-relaxed text-muted">
@@ -101,14 +100,13 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
           <button
             type="button"
             onClick={onStartLive}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent-strong bg-accent-strong px-6 py-3 text-sm text-on-accent hover:brightness-110"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-accent-strong bg-accent-strong px-6 py-3 text-sm text-on-accent hover:brightness-110"
           >
-            📂 Open a run folder
-            <span className="text-[12px] opacity-75">— browse or follow live</span>
+            <FolderOpen size={18} /> Open a run folder
           </button>
         )}
 
-        <label
+        <div
           onDragOver={(e) => {
             e.preventDefault();
             setDragging(true);
@@ -119,21 +117,23 @@ export function Loader({ onLoad, onError, error, onStartLive }: Props) {
             setDragging(false);
             onFiles(e.dataTransfer.files);
           }}
-          className="flex w-full cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed px-6 py-10"
+          className="flex w-full flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-6"
           style={{
             borderColor: dragging ? "var(--accent)" : "var(--border)",
             background: dragging ? "var(--elev)" : "var(--panel)",
           }}
         >
           <span className="text-sm text-text">Drop a trace file here</span>
-          <span className="text-[12px] text-faint">or choose JSON / JSONL</span>
+          <button type="button" onClick={() => fileInput.current?.click()} className="rounded border border-border bg-panel px-3 py-2 text-sm text-text hover:bg-panel-2">Choose trace file</button>
           <input
+            ref={fileInput}
             type="file"
             accept={TRACE_FILE_ACCEPT}
             className="hidden"
             onChange={(e) => onFiles(e.target.files)}
           />
-        </label>
+        </div>
+        <a href="https://github.com/YuLeo926/tracelens#analyze-a-codex-run" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-muted underline underline-offset-4"><Plug size={16} />Connect ChatGPT / Codex</a>
 
         <div className="flex w-full flex-col gap-2">
           <span className="text-[11px] uppercase tracking-wider text-faint">or open a sample</span>

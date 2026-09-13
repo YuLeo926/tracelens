@@ -108,6 +108,10 @@ function assertInstalledToolAnnotations(tools) {
 
 function assertInstalledToolDescriptions(tools) {
   for (const tool of tools) {
+    if (tool.name === "list_sessions") {
+      assert(tool.description.includes("compact session candidates"), "Installed list_sessions must describe compact results.");
+      continue;
+    }
     const expected = tool.name === "get_viewer_link" ? VIEWER_LINK_TOOL_DESCRIPTION : EVIDENCE_TOOL_DESCRIPTION;
     assert.equal(tool.description, expected, `Installed ${tool.name} description does not match the declared tool behavior.`);
   }
@@ -140,6 +144,12 @@ async function main() {
     const packagedFiles = new Set(dryRun.files.map((file) => file.path.replaceAll("\\", "/")));
     for (const requiredFile of REQUIRED_PACKAGE_FILES) {
       assert(packagedFiles.has(requiredFile), `Packed package is missing ${requiredFile}.`);
+    }
+    for (const file of packagedFiles) {
+      assert(
+        !/^(?:output|\.playwright-cli|\.codex|\.claude)(?:\/|$)/.test(file),
+        `Packed package contains private local artifacts: ${file}.`,
+      );
     }
     console.log("Verified npm pack contents.");
 
@@ -176,7 +186,7 @@ async function main() {
       cwd: projectDirectory,
       env: helpInvocation.env,
     });
-    for (const command of ["open", "list", "mcp", "setup codex"]) {
+    for (const command of ["open", "list", "mcp", "setup codex", "check"]) {
       assert(help.stdout.includes(command), `Installed CLI help is missing ${command}.`);
     }
     console.log("Verified the installed npm bin shim and CLI help.");
@@ -188,6 +198,11 @@ async function main() {
         CODEX_HOME: codexHome,
       }).filter((entry) => typeof entry[1] === "string"),
     );
+    const checkInvocation = installedShimInvocation(shim, "check", environmentOverrides);
+    const checked = await run(checkInvocation.command, checkInvocation.args, { cwd: projectDirectory, env: checkInvocation.env });
+    assert(checked.stdout.includes("PASS"), "Installed self-check did not pass.");
+    assert(checked.stdout.includes("viewer-http"), "Installed self-check did not test authenticated HTTP.");
+    console.log("Verified installed self-check through the npm bin shim.");
     const mcpInvocation = installedShimInvocation(shim, "mcp", environmentOverrides);
     transport = new OwnedStdioClientTransport({
       ...mcpInvocation,

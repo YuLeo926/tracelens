@@ -35,6 +35,41 @@ function harness(opts: Parameters<typeof fakeSource>[0]) {
 }
 
 describe("createLiveWatcher", () => {
+  it("does no content reads on unchanged metadata and detects growth and truncation at the same mtime", async () => {
+    let file = { text: TRACE("a"), lastModified: 1, sizeBytes: 100 };
+    const read = vi.fn(async () => file);
+    const stat = vi.fn(async () => ({ lastModified: file.lastModified, sizeBytes: file.sizeBytes }));
+    const update = vi.fn();
+    const watcher = createLiveWatcher({ read, stat, listCandidates: async () => [] }, { onUpdate: update, onStatus: () => {} }, { lockTo: "run" });
+    await watcher.init();
+    for (let i = 0; i < 100; i++) await watcher.fastTick();
+    expect(read).toHaveBeenCalledTimes(1);
+    file = { ...file, text: TRACE("a", "b"), sizeBytes: 200 };
+    await watcher.fastTick();
+    file = { ...file, text: TRACE("c"), sizeBytes: 50 };
+    await watcher.fastTick();
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(update).toHaveBeenCalledTimes(3);
+    expect(update.mock.calls[2][0].trace.byId.has("c")).toBe(true);
+  });
+
+  it("recovers after metadata and content read failures without losing the last trace", async () => {
+    const file = { text: TRACE("a"), lastModified: 1, sizeBytes: 100 };
+    const read = vi.fn(async () => file);
+    const stat = vi.fn(async () => ({ lastModified: 1, sizeBytes: 100 }));
+    const status = vi.fn();
+    const update = vi.fn();
+    const watcher = createLiveWatcher({ read, stat, listCandidates: async () => [] }, { onUpdate: update, onStatus: status }, { lockTo: "run" });
+    await watcher.init();
+    for (let i = 0; i < 3; i++) { stat.mockRejectedValueOnce(new Error("gone")); await watcher.fastTick(); }
+    expect(status).toHaveBeenLastCalledWith("stalled");
+    await watcher.fastTick();
+    expect(status).toHaveBeenLastCalledWith("live");
+    stat.mockResolvedValueOnce({ lastModified: 2, sizeBytes: 200 });
+    read.mockRejectedValueOnce(new Error("busy"));
+    await expect(watcher.fastTick()).resolves.toBeUndefined();
+    expect(update).toHaveBeenCalledTimes(1);
+  });
   it("adopts the newest PARSEABLE file, skipping a newer non-trace file", async () => {
     const { w, onUpdate, lastStatus } = harness({
       candidates: [

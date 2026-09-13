@@ -1,6 +1,7 @@
 import type { RunNode } from "../../../core/types";
 import { kindColor } from "../../../lib/kinds";
 import { formatDuration } from "../../../core/format";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Props {
   node: RunNode;
@@ -57,32 +58,34 @@ export function SpanRow({
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
           onSelect();
         }
       }}
-      className={`grid cursor-pointer grid-cols-[minmax(0,1fr)_150px_56px] items-center gap-2.5 border-l-2 py-1.5 pr-3 text-[12px] ${selected ? "bg-elev" : "hover:bg-panel-2"}`}
+      aria-label={`${node.name}${isError ? ", error" : ""}`}
+      aria-pressed={selected}
+      className={`span-row grid cursor-pointer items-center gap-2 border-l-2 py-2 pr-3 text-[13px] ${selected ? "bg-elev" : "hover:bg-panel-2"}`}
       style={rowStyle}
     >
-      <div className="flex min-w-0 items-center gap-1.5" style={{ paddingLeft: 6 + node.depth * 18 }}>
+      <div className="flex min-w-0 items-center gap-1.5" style={{ paddingLeft: 6 + Math.min(node.depth, 6) * 14 }}>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onToggle();
           }}
-          className="mono flex h-4 w-3 shrink-0 items-center justify-center text-[9px] text-faint"
+          className="flex h-7 w-5 shrink-0 items-center justify-center text-muted"
           style={{ visibility: showToggle && hasChildren ? "visible" : "hidden" }}
           aria-label={collapsed ? "Expand" : "Collapse"}
         >
-          {collapsed ? "▶" : "▾"}
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
         </button>
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
-        <span className="truncate" style={isError ? { color: "var(--error)" } : undefined}>
+        <span className="min-w-0 truncate" title={node.name} style={isError ? { color: "var(--error)" } : undefined}>
           <HighlightedName name={node.name} query={isMatch ? query : ""} />
         </span>
         {node.model && (
-          <span className="mono shrink-0 rounded border border-border bg-bg px-1 text-[10px] text-muted">
+          <span className="span-model mono max-w-[140px] truncate rounded border border-border bg-bg px-1 text-[11px] text-muted" title={node.model}>
             {node.model}
           </span>
         )}
@@ -93,7 +96,7 @@ export function SpanRow({
         )}
       </div>
 
-      <div className="relative h-1.5 rounded-full bg-track">
+      <div className="span-waterfall relative h-1.5 overflow-hidden rounded-full bg-track">
         <div
           className="absolute top-0 h-1.5 rounded-full"
           style={{ left: `${leftPct}%`, width: `${widthPct}%`, background: color, opacity: 0.9 }}

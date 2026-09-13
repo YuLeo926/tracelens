@@ -53,6 +53,7 @@ export interface TraceSummary {
   totalTokensIn: number;
   totalTokensOut: number;
   totalCostUsd: number;
+  costedSpanCount?: number;
   startMs: number;
   endMs: number;
   durationMs: number;

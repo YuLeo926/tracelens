@@ -27,6 +27,20 @@ export function TreeView({
   const { startMs, durationMs } = trace.summary;
   const containerRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    const ancestors = new Set<string>();
+    let parent = trace.byId.get(selectedId)?.parentSpanId;
+    while (parent && !ancestors.has(parent)) {
+      ancestors.add(parent);
+      parent = trace.byId.get(parent)?.parentSpanId;
+    }
+    setCollapsed((previous) => {
+      if (![...ancestors].some((id) => previous.has(id))) return previous;
+      return new Set([...previous].filter((id) => !ancestors.has(id)));
+    });
+  }, [selectedId, trace]);
+
   // When filtering, ignore the collapse set and show matches + ancestors only.
   const allRows = flatten(trace.roots, filtering ? undefined : collapsed);
   const rows = filtering && visibleIds ? allRows.filter((n) => visibleIds.has(n.spanId)) : allRows;
@@ -42,15 +56,15 @@ export function TreeView({
 
   useEffect(() => {
     if (!currentMatchId) return;
-    const el = containerRef.current?.querySelector(`[data-span-id="${currentMatchId}"]`);
+    const el = [...(containerRef.current?.querySelectorAll<HTMLElement>("[data-span-id]") ?? [])].find((node) => node.dataset.spanId === currentMatchId);
     el?.scrollIntoView({ block: "nearest" });
   }, [currentMatchId]);
 
   useEffect(() => {
     if (!followId) return;
-    const el = containerRef.current?.querySelector(`[data-span-id="${followId}"]`);
+    const el = [...(containerRef.current?.querySelectorAll<HTMLElement>("[data-span-id]") ?? [])].find((node) => node.dataset.spanId === followId);
     el?.scrollIntoView({ block: "nearest" });
-  }, [followId]);
+  }, [followId, collapsed]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

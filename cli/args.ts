@@ -2,6 +2,7 @@ export type ParsedArgs =
   | { command: "open"; file: string | undefined }
   | { command: "list" }
   | { command: "mcp" }
+  | { command: "check"; json: boolean }
   | { command: "setup-codex"; force: boolean }
   | { command: "help" }
   | { command: "unknown" };
@@ -21,6 +22,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (command === "list") {
     if (rest.length > 0) throw new Error("The list command does not accept additional arguments.");
     return { command: "list" };
+  }
+  if (command === "check") {
+    if (rest.length > 1 || (rest[0] !== undefined && rest[0] !== "--json")) throw new Error("Unsupported check option.");
+    return { command: "check", json: rest[0] === "--json" };
   }
   if (command === "mcp") {
     if (rest.length > 0) throw new Error("The mcp command does not accept additional arguments.");

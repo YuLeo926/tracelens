@@ -11,6 +11,7 @@ import type {
   SessionLifecycle,
   SessionProvider,
   SessionSummary,
+  SessionListFilters,
 } from "../src/core/session/types";
 import type { ParsedTrace } from "../src/core/types";
 import {
@@ -32,7 +33,7 @@ export interface LoadedSession {
 }
 
 export interface SessionRepository {
-  list(args?: {
+  list(args?: SessionListFilters & {
     scope?: "current_project" | "all";
     provider?: SessionProvider;
     limit?: number;
@@ -161,15 +162,25 @@ export async function createSessionRepository(
 ): Promise<SessionRepository> {
   let candidates: SessionCandidate[] = [];
   const cache = new Map<string, CacheEntry>();
+  let refreshing: Promise<void> | undefined;
 
-  async function refresh(): Promise<void> {
-    if (options.explicitFile === undefined) {
-      candidates = await discoverSessionCandidates(options);
-    } else {
-      const explicit = await discoverExplicitSessionCandidate(options.explicitFile, options.cwd);
-      candidates = explicit ? [explicit] : [];
-    }
-    candidates = rankSessionCandidates(candidates, options.cwd);
+  function refresh(): Promise<void> {
+    if (refreshing) return refreshing;
+    refreshing = (async () => {
+      let discovered: SessionCandidate[];
+      if (options.explicitFile === undefined) {
+        discovered = await discoverSessionCandidates(options);
+      } else {
+        const explicit = await discoverExplicitSessionCandidate(options.explicitFile, options.cwd);
+        discovered = explicit ? [explicit] : [];
+      }
+      candidates = rankSessionCandidates(discovered, options.cwd);
+      const paths = new Set(candidates.map((candidate) => candidate.path));
+      for (const cachedPath of cache.keys()) {
+        if (!paths.has(cachedPath)) cache.delete(cachedPath);
+      }
+    })().finally(() => { refreshing = undefined; });
+    return refreshing;
   }
 
   async function loadCandidate(candidate: SessionCandidate): Promise<LoadedSession> {
@@ -230,6 +241,12 @@ export async function createSessionRepository(
 
   return {
     async list(args = {}) {
+      if ((args.since !== undefined && !Number.isFinite(args.since))
+        || (args.until !== undefined && !Number.isFinite(args.until))
+        || (args.since !== undefined && args.until !== undefined && args.since > args.until)) {
+        throw new Error("Invalid session date range.");
+      }
+      await refresh();
       const scope = args.scope ?? "current_project";
       const providerCandidates = args.provider === undefined
         ? candidates
@@ -241,8 +258,13 @@ export async function createSessionRepository(
       const summaries: SessionSummary[] = [];
       for (const candidate of selected) {
         if (summaries.length >= limit) break;
+        if (args.since !== undefined && candidate.modifiedAt < args.since) continue;
+        if (args.until !== undefined && candidate.modifiedAt > args.until) continue;
+        const query = args.query?.trim().toLowerCase();
+        if (query && ![candidate.title, candidate.project, candidate.provider].some((value) => value?.toLowerCase().includes(query))) continue;
         try {
           const loaded = await loadCandidate(candidate);
+          if (args.signal && !loaded.facts.signals?.includes(args.signal)) continue;
           summaries.push({
             ...loaded.summary,
             selectionReason: selectionReason(candidate.match, isCurrentProjectFallback),

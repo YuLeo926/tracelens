@@ -29,6 +29,15 @@ function span(
 }
 
 describe("buildRunFacts", () => {
+  it("does not mistake error list indices for token percentages", () => {
+    const facts = buildRunFacts(parseTrace([
+      span("a", 0, "tool", "shell", "error", "first"),
+      span("b", 2, "tool", "shell", "error", "second"),
+    ]), "failed");
+    expect(facts.errorEvents).toHaveLength(2);
+    for (const event of facts.errorEvents) expect(event).not.toHaveProperty("tokenSharePercent");
+  });
+
   it("reports repeated operations as facts without diagnosing a loop", () => {
     const trace = parseTrace([
       span("a", 0, "tool", "shell", "error", '{"command":"npm   test"}'),

@@ -48,6 +48,57 @@ afterEach(async () => {
 });
 
 describe("createSessionRepository", () => {
+  it("applies query, dates, and signals before the result cap without crossing project scope", async () => {
+    const home = await makeHome();
+    const cwd = path.join(home, "work", "target");
+    const old = path.join(home, ".codex", "sessions", "old.jsonl");
+    const recent = path.join(home, ".codex", "sessions", "recent.jsonl");
+    const other = path.join(home, ".codex", "sessions", "other.jsonl");
+    await writeCodexSession(old, cwd, "Find build");
+    await appendFile(old, JSON.stringify({ type: "event_msg", payload: { type: "turn_aborted" } }) + "\n");
+    await writeCodexSession(recent, cwd, "New session");
+    await writeCodexSession(other, path.join(home, "elsewhere"), "Outside project");
+    await utimes(old, 1000, 1000); await utimes(recent, 2000, 2000);
+    const repository = await createSessionRepository({ homeDir: home, cwd });
+    expect((await repository.list({ query: "BUILD", limit: 1 }))[0]?.title).toBe("Find build");
+    expect((await repository.list({ since: 1_000_000, until: 1_000_000, signal: "stopped", limit: 1 }))[0]?.title).toBe("Find build");
+    expect(await repository.list({ query: "Outside" })).toEqual([]);
+    expect(await repository.list({ since: 1_000_001, until: 1_999_999 })).toEqual([]);
+    await expect(repository.list({ since: 2, until: 1 })).rejects.toThrow();
+    await expect(repository.list({ since: NaN })).rejects.toThrow();
+  });
+  it("discovers new sessions and reorders modified sessions on every list", async () => {
+    const home = await makeHome();
+    const cwd = path.join(home, "work", "tracelens");
+    const oldFile = path.join(home, ".codex", "sessions", "old.jsonl");
+    const newFile = path.join(home, ".codex", "sessions", "new.jsonl");
+    await writeCodexSession(oldFile, cwd, "Old run");
+    await utimes(oldFile, 1000, 1000);
+    const repository = await createSessionRepository({ homeDir: home, cwd });
+    expect(await repository.list()).toHaveLength(1);
+
+    await writeCodexSession(newFile, cwd, "New run");
+    await utimes(newFile, 2000, 2000);
+    expect((await repository.list()).map((item) => item.title)).toEqual(["New run", "Old run"]);
+    await utimes(oldFile, 3000, 3000);
+    expect((await repository.list({ limit: 1 }))[0].title).toBe("Old run");
+    await fs.unlink(oldFile);
+    expect((await repository.list()).map((item) => item.title)).toEqual(["New run"]);
+  });
+
+  it("keeps an active rollout with an incomplete final record visible", async () => {
+    const home = await makeHome();
+    const cwd = path.join(home, "work", "tracelens");
+    const file = path.join(home, ".codex", "sessions", "active-rollout.jsonl");
+    await writeCodexSession(file, cwd);
+    await appendFile(file, `${JSON.stringify({ type: "event_msg", payload: { type: "task_started" } })}\n{"type":`);
+    const repository = await createSessionRepository({ homeDir: home, cwd });
+    const summaries = await repository.list();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].lifecycle).toBe("active");
+    expect((await repository.load(summaries[0].id)).trace.summary.llmCalls).toBe(1);
+  });
+
   it("caps list results and labels a current-project fallback", async () => {
     const home = await makeHome();
     const cwd = path.join(home, "work", "missing-project");

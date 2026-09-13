@@ -66,6 +66,23 @@ function lifecycle() {
 }
 
 describe("MCP tool registration", () => {
+  it("validates list filters and preserves only the intentional viewer authentication token", async () => {
+    const url = "http://127.0.0.1:1234/?session=one#token=keep-this-token";
+    const handlers = {
+      getViewerLink: vi.fn().mockResolvedValue({ data: { url, note: "token=remove-this-token" } }),
+      getEventDetail: vi.fn().mockResolvedValue({ data: { input: '{"password":"private-secret"}' } }),
+    } as unknown as TraceLensHandlers;
+    const tools = registration(handlers);
+    const schema = tool(tools, "list_sessions").inputSchema;
+    expect(schema.safeParse({ since: 2, until: 1 }).success).toBe(false);
+    expect(schema.safeParse({ signal: "diagnosed" }).success).toBe(false);
+    expect(schema.safeParse({ signal: "recovered", query: " build ", detail: "compact" }).success).toBe(true);
+    const linked = await tool(tools, "get_viewer_link").handler({ sessionId: "one" });
+    expect(linked.structuredContent.data).toMatchObject({ url });
+    expect(JSON.stringify(linked)).not.toContain("remove-this-token");
+    const detail = await tool(tools, "get_event_detail").handler({ sessionId: "one", eventId: "two" });
+    expect(JSON.stringify(detail)).not.toContain("private-secret");
+  });
   it("registers the required tools and returns compact structured content", async () => {
     const handlers = {
       listSessions: vi.fn().mockResolvedValue({ dataClassification: "untrusted-local-log", data: [] }),
@@ -83,7 +100,8 @@ describe("MCP tool registration", () => {
     const evidenceTools = registered.filter(({ name }) => name !== "get_viewer_link");
     expect(evidenceTools).toHaveLength(5);
     for (const registeredTool of evidenceTools) {
-      expect(registeredTool.description).toBe(EVIDENCE_TOOL_DESCRIPTION);
+      if (registeredTool.name === "list_sessions") expect(registeredTool.description).toContain("compact session candidates");
+      else expect(registeredTool.description).toBe(EVIDENCE_TOOL_DESCRIPTION);
     }
     const viewerLink = tool(registered, "get_viewer_link");
     expect(viewerLink.description).toBe(VIEWER_LINK_TOOL_DESCRIPTION);

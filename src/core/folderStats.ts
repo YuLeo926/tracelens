@@ -21,11 +21,18 @@ export interface DashboardModel {
   totalCachedIn: number;
   totalTokensOut: number;
   estCostUsd: number;
+  costCoverage: { modelRate: number; fallback: number; missing: number; modelRateUsd: number; fallbackUsd: number };
   projects: ProjectRow[];
   activity: DayBar[];
 }
 
 function parseLines(text: string): unknown[] {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    // JSONL and partial file boundaries are handled record by record.
+  }
   const out: unknown[] = [];
   for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
@@ -67,7 +74,7 @@ function usageOf(record: unknown): Record<string, unknown> | undefined {
   return usage && typeof usage === "object" ? usage as Record<string, unknown> : undefined;
 }
 
-export function extractTokens(tail: string): TokenTotals | null {
+export function createTokenAccumulator() {
   let codexFound: TokenTotals | null = null;
   const claudeSum: Required<TokenTotals> = {
     tokensIn: 0,
@@ -78,20 +85,22 @@ export function extractTokens(tail: string): TokenTotals | null {
   };
   let hasClaudeUsage = false;
 
-  for (const r of parseLines(tail)) {
+  function add(r: unknown): void {
+    if (!r || typeof r !== "object") return;
     const p = (r as { payload?: { type?: unknown; info?: { total_token_usage?: Record<string, unknown> } } }).payload;
     if (p?.type === "token_count") {
-      const u = p.info?.total_token_usage ?? {};
+      const u = p.info?.total_token_usage;
+      if (!u || ![u.input_tokens, u.output_tokens].some((v) => typeof v === "number" && Number.isFinite(v))) return;
       codexFound = {
         tokensIn: num(u.input_tokens),
         tokensOut: num(u.output_tokens),
         cachedIn: num(u.cached_input_tokens),
       };
-      continue;
+      return;
     }
 
     const usage = usageOf(r);
-    if (!usage) continue;
+    if (!usage) return;
     const input = num(usage.input_tokens);
     const output = num(usage.output_tokens);
     const cacheRead = num(usage.cache_read_input_tokens);
@@ -105,7 +114,7 @@ export function extractTokens(tail: string): TokenTotals | null {
       cacheWrite5m + cacheWrite1h,
     );
     if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) {
-      continue;
+      return;
     }
     hasClaudeUsage = true;
     claudeSum.tokensIn += input + cacheRead + cacheWrite;
@@ -114,16 +123,25 @@ export function extractTokens(tail: string): TokenTotals | null {
     claudeSum.cacheWriteIn += cacheWrite;
     claudeSum.cacheWrite1hIn += Math.min(cacheWrite1h, cacheWrite);
   }
-  if (codexFound) return codexFound;
-  if (!hasClaudeUsage) return null;
-  const result: TokenTotals = {
-    tokensIn: claudeSum.tokensIn,
-    tokensOut: claudeSum.tokensOut,
-    cachedIn: claudeSum.cachedIn,
-    cacheWriteIn: claudeSum.cacheWriteIn,
-  };
-  if (claudeSum.cacheWrite1hIn > 0) result.cacheWrite1hIn = claudeSum.cacheWrite1hIn;
-  return result;
+  function totals(): TokenTotals | null {
+    if (codexFound) return { ...codexFound };
+    if (!hasClaudeUsage) return null;
+    const result: TokenTotals = {
+      tokensIn: claudeSum.tokensIn,
+      tokensOut: claudeSum.tokensOut,
+      cachedIn: claudeSum.cachedIn,
+      cacheWriteIn: claudeSum.cacheWriteIn,
+    };
+    if (claudeSum.cacheWrite1hIn > 0) result.cacheWrite1hIn = claudeSum.cacheWrite1hIn;
+    return result;
+  }
+  return { add, totals };
+}
+
+export function extractTokens(text: string): TokenTotals | null {
+  const accumulator = createTokenAccumulator();
+  for (const record of parseLines(text)) accumulator.add(record);
+  return accumulator.totals();
 }
 
 /** First parseable top-level `timestamp` in the head, as epoch ms. */
@@ -191,7 +209,7 @@ const SONNET_5_STANDARD_START_MS = Date.parse("2026-09-01T00:00:00.000Z");
 
 function knownRateForModel(model: string | undefined, atMs: number): PriceRate | undefined {
   if (!model) return undefined;
-  if (/claude.*sonnet.*5/i.test(model)) {
+  if (/(?:^|\/)claude-sonnet-5(?:-\d{8}|-latest)?$/i.test(model)) {
     return atMs < SONNET_5_STANDARD_START_MS
       ? { inUsd: 2, cachedUsd: 0.2, outUsd: 10, cacheWrite5mUsd: 2.5, cacheWrite1hUsd: 4 }
       : { inUsd: 3, cachedUsd: 0.3, outUsd: 15, cacheWrite5mUsd: 3.75, cacheWrite1hUsd: 6 };
@@ -201,6 +219,14 @@ function knownRateForModel(model: string | undefined, atMs: number): PriceRate |
 
 function rateForModel(model: string | undefined, atMs: number): PriceRate {
   return knownRateForModel(model, atMs) ?? FALLBACK;
+}
+
+export function conversationCost(stat: ConvStat): { kind: "model-rate" | "fallback" | "missing"; usd?: number } {
+  if (stat.tokensIn === undefined || stat.tokensOut === undefined
+    || !Number.isFinite(stat.tokensIn) || !Number.isFinite(stat.tokensOut)) return { kind: "missing" };
+  const atMs = stat.startMs ?? stat.lastModified;
+  const kind = knownRateForModel(stat.model, atMs) ? "model-rate" : "fallback";
+  return { kind, usd: estimateCostUsd(stat.tokensIn, stat.tokensOut, stat.cachedIn ?? 0, stat.model, stat.cacheWriteIn ?? 0, stat.cacheWrite1hIn ?? 0, atMs) };
 }
 
 function estimateWithRate(
@@ -272,19 +298,27 @@ export function aggregateDashboard(stats: ConvStat[], now: number): DashboardMod
   let totalCachedIn = 0;
   let totalTokensOut = 0;
   let estCostUsd = 0;
+  const costCoverage = { modelRate: 0, fallback: 0, missing: 0, modelRateUsd: 0, fallbackUsd: 0 };
   const byProject = new Map<string, ProjectRow>();
   const byDay = new Map<string, number>();
 
   for (const s of stats) {
     const tIn = s.tokensIn ?? 0;
     const cIn = s.cachedIn ?? 0;
-    const cWrite = s.cacheWriteIn ?? 0;
-    const cWrite1h = s.cacheWrite1hIn ?? 0;
     const tOut = s.tokensOut ?? 0;
     totalTokensIn += tIn;
     totalCachedIn += cIn;
     totalTokensOut += tOut;
-    estCostUsd += estimateCostUsd(tIn, tOut, cIn, s.model, cWrite, cWrite1h, s.startMs ?? s.lastModified);
+    const estimate = conversationCost(s);
+    estCostUsd += estimate.usd ?? 0;
+    if (estimate.kind === "missing") costCoverage.missing += 1;
+    else if (estimate.kind === "fallback") {
+      costCoverage.fallback += 1;
+      costCoverage.fallbackUsd += estimate.usd ?? 0;
+    } else {
+      costCoverage.modelRate += 1;
+      costCoverage.modelRateUsd += estimate.usd ?? 0;
+    }
 
     const project = s.project ?? "(unknown)";
     const row = byProject.get(project) ?? { project, count: 0, tokens: 0, lastActive: 0 };
@@ -314,6 +348,7 @@ export function aggregateDashboard(stats: ConvStat[], now: number): DashboardMod
     totalCachedIn,
     totalTokensOut,
     estCostUsd,
+    costCoverage,
     projects,
     activity,
   };

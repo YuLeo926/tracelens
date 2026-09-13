@@ -111,6 +111,7 @@ function summarize(spans: RawSpan[]): TraceSummary {
   let totalTokensIn = 0;
   let totalTokensOut = 0;
   let totalCostUsd = 0;
+  let costedSpanCount = 0;
   let startMs = Infinity;
   let endMs = -Infinity;
 
@@ -126,6 +127,7 @@ function summarize(spans: RawSpan[]): TraceSummary {
     totalTokensIn += span.tokensIn ?? 0;
     totalTokensOut += span.tokensOut ?? 0;
     totalCostUsd += span.costUsd ?? 0;
+    if (span.costUsd !== undefined) costedSpanCount++;
     if (Number.isFinite(span.startMs)) startMs = Math.min(startMs, span.startMs);
     if (Number.isFinite(span.endMs)) endMs = Math.max(endMs, span.endMs);
   }
@@ -140,6 +142,7 @@ function summarize(spans: RawSpan[]): TraceSummary {
     totalTokensIn,
     totalTokensOut,
     totalCostUsd,
+    costedSpanCount,
     startMs,
     endMs,
     durationMs: Math.max(0, endMs - startMs),

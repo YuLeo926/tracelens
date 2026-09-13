@@ -6,7 +6,8 @@ export interface LiveSource {
   /** Candidate trace files in the folder, NEWEST first. */
   listCandidates(): Promise<Array<{ name: string; lastModified: number }>>;
   /** Read one file's current text + mtime, or null if it is gone. */
-  read(name: string): Promise<{ lastModified: number; text: string } | null>;
+  read(name: string): Promise<{ lastModified: number; sizeBytes?: number; text: string } | null>;
+  stat?(name: string): Promise<{ lastModified: number; sizeBytes: number } | null>;
 }
 
 export interface LiveUpdate {
@@ -48,6 +49,7 @@ export function createLiveWatcher(
   const locked = opts.lockTo ?? null;
   let current: string | null = locked;
   let lastMtime = -1;
+  let lastSize: number | undefined;
   let failures = 0;
 
   const parse = (text: string): ParsedTrace | null => {
@@ -58,9 +60,10 @@ export function createLiveWatcher(
     }
   };
 
-  const emit = (name: string, mtime: number, text: string, trace: ParsedTrace) => {
+  const emit = (name: string, mtime: number, text: string, trace: ParsedTrace, sizeBytes?: number) => {
     current = name;
     lastMtime = mtime;
+    lastSize = sizeBytes;
     failures = 0;
     cb.onStatus("live");
     cb.onUpdate({ trace, label: name, source: text });
@@ -83,11 +86,11 @@ export function createLiveWatcher(
     }
     for (const c of candidates) {
       if (onlyNewer && current && c.name === current) return; // current is newest parseable
-      const file = await source.read(c.name);
+      const file = await source.read(c.name).catch(() => null);
       if (!file) continue;
       const trace = parse(file.text);
       if (trace) {
-        emit(c.name, file.lastModified, file.text, trace);
+        emit(c.name, file.lastModified, file.text, trace, file.sizeBytes);
         return;
       }
     }
@@ -114,14 +117,24 @@ export function createLiveWatcher(
 
   const pollCurrent = async (): Promise<void> => {
     if (!current) return;
-    const file = await source.read(current);
+    if (source.stat) {
+      let metadata;
+      try { metadata = await source.stat(current); } catch { metadata = null; }
+      if (!metadata) { noteFailure(); return; }
+      if (metadata.lastModified === lastMtime && metadata.sizeBytes === lastSize) {
+        if (failures > 0) cb.onStatus("live");
+        failures = 0;
+        return;
+      }
+    }
+    const file = await source.read(current).catch(() => null);
     if (!file) {
       noteFailure();
       return;
     }
-    if (file.lastModified === lastMtime) return; // no change
+    if (file.lastModified === lastMtime && file.sizeBytes === lastSize) return;
     const trace = parse(file.text);
-    if (trace) emit(current, file.lastModified, file.text, trace);
+    if (trace) emit(current, file.lastModified, file.text, trace, file.sizeBytes);
     else noteFailure();
   };
 

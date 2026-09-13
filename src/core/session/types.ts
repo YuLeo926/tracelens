@@ -3,6 +3,8 @@ import type { SpanKind, SpanStatus } from "../types";
 export type SessionProvider = "codex" | "claude" | "generic";
 export type SessionLifecycle = "active" | "complete" | "failed" | "unknown";
 export type ProjectMatch = "exact" | "related" | "fallback";
+export const SESSION_SIGNALS = ["tool_errors", "repeated_failures", "recovered", "stopped", "active", "unknown"] as const;
+export type SessionSignal = typeof SESSION_SIGNALS[number];
 
 export interface EventRef {
   eventId: string;
@@ -31,6 +33,7 @@ export interface RepeatedOperationFact {
 }
 
 export interface RunFacts {
+  signals?: SessionSignal[];
   lifecycle: SessionLifecycle;
   totals: {
     durationMs: number;
@@ -45,6 +48,17 @@ export interface RunFacts {
   highestTokenEvents: EventRef[];
   repeatedOperations: RepeatedOperationFact[];
 }
+
+export interface SessionListFilters {
+  query?: string;
+  since?: number;
+  until?: number;
+  signal?: SessionSignal;
+}
+
+export type CompactSessionSummary = Omit<SessionSummary, "facts"> & {
+  facts: Pick<RunFacts, "totals" | "signals">;
+};
 
 export interface SessionSummary {
   id: string;

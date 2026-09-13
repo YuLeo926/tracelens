@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { parseArgs } from "./args";
 
 describe("parseArgs", () => {
+  it("accepts self-check modes and rejects extra arguments", () => {
+    expect(parseArgs(["check"])).toEqual({ command: "check", json: false });
+    expect(parseArgs(["check", "--json"])).toEqual({ command: "check", json: true });
+    expect(() => parseArgs(["check", "--json", "extra"])).toThrow();
+    expect(() => parseArgs(["check", "--force"])).toThrow();
+  });
   it("uses open by default and accepts the supported commands", () => {
     expect(parseArgs([])).toEqual({ command: "open", file: undefined });
     expect(parseArgs(["open", "run.jsonl"])).toEqual({ command: "open", file: "run.jsonl" });

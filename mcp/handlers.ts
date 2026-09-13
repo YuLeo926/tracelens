@@ -11,6 +11,8 @@ import type {
   RunFacts,
   SessionProvider,
   SessionSummary,
+  CompactSessionSummary,
+  SessionListFilters,
 } from "../src/core/session/types";
 import type { SpanKind, SpanStatus } from "../src/core/types";
 
@@ -22,7 +24,7 @@ export interface TraceLensToolResult<T> {
 }
 
 export interface TraceLensHandlers {
-  listSessions(args: { scope?: "current_project" | "all"; provider?: SessionProvider; limit?: number }): Promise<TraceLensToolResult<SessionSummary[]>>;
+  listSessions(args: SessionListFilters & { scope?: "current_project" | "all"; provider?: SessionProvider; limit?: number; detail?: "compact" | "full" }): Promise<TraceLensToolResult<Array<CompactSessionSummary | SessionSummary>>>;
   getSessionOverview(args: { sessionId: string }): Promise<TraceLensToolResult<SessionSummary>>;
   getSessionTimeline(args: { sessionId: string; cursor?: string; limit?: number; kinds?: SpanKind[]; status?: SpanStatus }): Promise<TraceLensToolResult<QueryPage<EventPreview>>>;
   searchSession(args: { sessionId: string; query: string; cursor?: string; limit?: number }): Promise<TraceLensToolResult<QueryPage<EventPreview>>>;
@@ -77,7 +79,7 @@ function publicFacts(facts: RunFacts, sessionId: string): RunFacts {
   };
 }
 
-function publicSummary(summary: SessionSummary): SessionSummary {
+function publicMetadata(summary: SessionSummary): Omit<SessionSummary, "facts"> {
   return {
     id: summary.id,
     provider: summary.provider,
@@ -88,8 +90,11 @@ function publicSummary(summary: SessionSummary): SessionSummary {
     lifecycle: summary.lifecycle,
     match: summary.match,
     selectionReason: summary.selectionReason,
-    facts: publicFacts(summary.facts, summary.id),
   };
+}
+
+function publicSummary(summary: SessionSummary): SessionSummary {
+  return { ...publicMetadata(summary), facts: publicFacts(summary.facts, summary.id) };
 }
 
 function publicPreview(preview: EventPreview, ids: EventIdMap): EventPreview {
@@ -171,8 +176,14 @@ export function createTraceLensHandlers(repository: SessionRepository, viewer: V
           scope: args.scope ?? "current_project",
           ...(args.provider === undefined ? {} : { provider: args.provider }),
           limit,
+          ...(args.query === undefined ? {} : { query: args.query }),
+          ...(args.since === undefined ? {} : { since: args.since }),
+          ...(args.until === undefined ? {} : { until: args.until }),
+          ...(args.signal === undefined ? {} : { signal: args.signal }),
         });
-        return result(summaries.slice(0, limit).map(publicSummary));
+        return result(summaries.slice(0, limit).map((summary) => {
+          return args.detail === "full" ? publicSummary(summary) : { ...publicMetadata(summary), facts: { totals: summary.facts.totals, signals: summary.facts.signals ?? [] } };
+        }));
       } catch {
         throw new TraceLensPublicError("Unable to list sessions.");
       }

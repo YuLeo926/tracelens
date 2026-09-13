@@ -1,3 +1,5 @@
+import { redactEvidenceSecrets, redactSecretValues } from "./secrets";
+
 export interface ClippedText {
   text: string;
   truncated: boolean;
@@ -19,7 +21,7 @@ export function redactText(text: string): string {
 }
 
 export function clipText(text: string, maxChars: number): ClippedText {
-  const redacted = redactText(text);
+  const redacted = redactText(redactEvidenceSecrets(text));
   const originalLength = redacted.length;
   const limit = Math.max(0, Math.floor(maxChars));
   if (originalLength <= limit) {
@@ -40,9 +42,9 @@ export function safeAttributes(
   attributes: Record<string, unknown>,
 ): Record<string, string | number | boolean | null> {
   const safe: Record<string, string | number | boolean | null> = {};
-  for (const [key, value] of Object.entries(attributes)) {
+  for (const [key, value] of Object.entries(redactSecretValues(attributes) as Record<string, unknown>)) {
     const safeKey = redactText(key);
-    if (typeof value === "string") safe[safeKey] = redactText(value);
+    if (typeof value === "string") safe[safeKey] = redactText(redactEvidenceSecrets(value));
     else if (typeof value === "number" || typeof value === "boolean" || value === null) {
       safe[safeKey] = value;
     }

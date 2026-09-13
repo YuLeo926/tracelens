@@ -15,7 +15,7 @@ function Card({ label, value, caption }: { label: string; value: string; caption
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-border bg-panel px-4 py-3">
       <span className="text-[10px] uppercase tracking-wider text-faint">{label}</span>
-      <span className="text-lg text-text">{value}</span>
+      <span className="break-words text-lg text-text">{value}</span>
       {caption && <span className="text-[11px] text-faint">{caption}</span>}
     </div>
   );
@@ -45,8 +45,16 @@ export function DashboardView({ model, failed, conversations, onOpen, onPickProj
               : undefined
           }
         />
-        <Card label="Est. cost" value={`≈ ${formatCost(model.estCostUsd)}`} caption="rough estimate" />
+        <Card label="Est. cost" value={model.costCoverage.modelRate + model.costCoverage.fallback > 0 ? `≈ ${formatCost(model.estCostUsd)}` : "Unavailable"}
+          caption={`${model.costCoverage.modelRate} model rate / ${model.costCoverage.fallback} fallback / ${model.costCoverage.missing} missing usage`} />
         <Card label="Runs with errors" value={`${withErrors}${scanning ? ` · ${failed.done}/${failed.total}` : ""}`} />
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted" aria-label="Cost estimate coverage">
+        <span>Model-rate estimates: {formatCost(model.costCoverage.modelRateUsd)}</span>
+        <span>Fallback estimates: {formatCost(model.costCoverage.fallbackUsd)}</span>
+        {model.costCoverage.missing > 0 && <span>{model.costCoverage.missing} runs excluded: usage missing</span>}
+        <span>Estimates, not billed charges</span>
       </div>
 
       <div className="mt-6">

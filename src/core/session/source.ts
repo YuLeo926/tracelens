@@ -74,15 +74,22 @@ function providerOf(records: unknown[]): SessionProvider {
 function codexLifecycle(records: unknown[]): SessionLifecycle {
   let lifecycle: SessionLifecycle = "unknown";
   for (const record of records) {
-    if (!isCodexExec(record)) continue;
-    switch (typeOf(record)) {
+    const type = isCodexExec(record)
+      ? typeOf(record)
+      : isRecord(record) && record.type === "event_msg" && isRecord(record.payload)
+        ? record.payload.type
+        : undefined;
+    switch (type) {
       case "turn.started":
+      case "task_started":
         lifecycle = "active";
         break;
       case "turn.completed":
+      case "task_complete":
         lifecycle = "complete";
         break;
       case "turn.failed":
+      case "turn_aborted":
         lifecycle = "failed";
         break;
     }
@@ -101,9 +108,11 @@ function claudeLifecycle(records: unknown[]): SessionLifecycle {
       lifecycle = "failed";
       continue;
     }
-    if (!isClaudeCode(record) || record.type !== "assistant") continue;
+    if (!isClaudeCode(record)) continue;
+    if (record.type === "user") { lifecycle = "active"; continue; }
     const stopReason = record.message.stop_reason;
-    if (typeof stopReason === "string" && stopReason.trim()) lifecycle = "complete";
+    if (stopReason === "end_turn" || stopReason === "stop_sequence") lifecycle = "complete";
+    else if (stopReason === "tool_use" || stopReason === "pause_turn") lifecycle = "active";
   }
   return lifecycle;
 }
