@@ -4,7 +4,7 @@
 
 [![live demo](https://img.shields.io/badge/demo-live-3DC9C0)](https://yuleo926.github.io/tracelens/) ![license](https://img.shields.io/badge/license-MIT-E8A23D) ![types](https://img.shields.io/badge/TypeScript-strict-3DC9C0) ![status](https://img.shields.io/badge/status-maintenance-777777)
 
-**Maintenance status:** active product expansion has ended. Work is limited to bug fixes, compatibility, and security maintenance. TraceLens has not demonstrated higher diagnostic accuracy or lower total analysis-token usage than an agent reading logs directly. Local evaluations of false-completion detection and cross-session rework analysis did not meet their acceptance criteria; these are not validated product benefits.
+**Maintenance status:** bug fixes, compatibility, and security maintenance only; see the [product evaluations](https://github.com/YuLeo926/tracelens/blob/main/docs/evaluation.md).
 
 **▶ [Try it live → yuleo926.github.io/tracelens](https://yuleo926.github.io/tracelens/)** — runs entirely in your browser, no install, nothing uploaded.
 
@@ -33,7 +33,7 @@ The command remains `setup codex` for compatibility. The current ChatGPT desktop
 
 TraceLens ranks recent sessions for the current project and gives the calling agent bounded, read-only evidence. No separate model API or TraceLens account is required. Registration does not prove that the current chat can call the tools; complete the workflow below to verify the client.
 
-**Desktop setup without the Codex CLI:** in **Settings > MCP servers > Add server**, enter name `tracelens`, transport **STDIO**, command `npx`, and arguments `-y`, `@yuleo/tracelens@0.2.3`, `mcp` as separate arguments. Save, enable and restart the server. Do not replace an existing registration without checking what it runs.
+**Desktop setup without the Codex CLI:** in **Settings > MCP servers > Add server**, enter name `tracelens`, transport **STDIO**, command `npx`, and arguments `-y`, `@yuleo/tracelens@0.2.4`, `mcp` as separate arguments. Save, enable and restart the server. Do not replace an existing registration without checking what it runs.
 
 **Testing a source checkout:** run `npm run build`, then register `node` with the absolute path to this checkout's `dist-cli/index.js` followed by `mcp`, instead of the npm command. This uses the local build, not the npm package. Rebuild after code changes and restart the MCP server. Moving this checkout requires updating that path.
 
@@ -68,8 +68,8 @@ An incomplete log may support observations without proving a root cause. Treat t
 With version 0.2.3 or newer:
 
 ```bash
-npx @yuleo/tracelens@0.2.3 check
-npx @yuleo/tracelens@0.2.3 check --json
+npx @yuleo/tracelens@0.2.4 check
+npx @yuleo/tracelens@0.2.4 check --json
 ```
 
 In a source checkout, build once and run:
