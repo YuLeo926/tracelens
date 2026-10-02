@@ -27,11 +27,12 @@ function summary(id: string, title = `Run ${id}`, eventId = `${id}-event`): Sess
 
 class Api {
   sessions: SessionSummary[] = [];
+  listResponse: Deferred<Response> | undefined;
   pending = new Map<string, Deferred<Response>[]>();
   calls: string[] = [];
   fetch = vi.fn<typeof fetch>((input) => {
     const url = String(input);
-    if (url === "/api/sessions") return Promise.resolve(json(this.sessions));
+    if (url === "/api/sessions") return this.listResponse?.promise ?? Promise.resolve(json(this.sessions));
     const parsedUrl = new URL(url, "http://viewer.local");
     const id = decodeURIComponent(parsedUrl.pathname.slice("/api/sessions/".length));
     this.calls.push(id);
@@ -79,6 +80,42 @@ beforeEach(() => {
 afterEach(async () => { if (root) await act(async () => root.unmount()); host?.remove(); globalThis.fetch = originalFetch; });
 
 describe("App local session integration", () => {
+  it("loads event deep links without listing other sessions and isolates picker failures", async () => {
+    const api = new Api(); const first = summary("first"); const second = summary("second");
+    api.listResponse = deferred<Response>();
+    await mount(api, route("first", "first-event")); await resolve(api, first);
+    expect(host.querySelector('[data-span-id="first-event"][aria-pressed="true"]')).not.toBeNull();
+    expect(api.fetch.mock.calls.some(([url]) => url === "/api/sessions")).toBe(false);
+    await click(button("Sessions"));
+    expect(host.querySelector('[role="dialog"]')?.getAttribute("aria-busy")).toBe("true");
+    await act(async () => api.listResponse!.reject(new Error("List failed"))); await flush();
+    expect(host.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe("TraceLens could not load this session.");
+    expect(host.querySelector('[data-span-id="first-event"][aria-pressed="true"]')).not.toBeNull();
+    await click(host.querySelector('button[aria-label="Close session picker"]')!);
+    api.listResponse = deferred<Response>();
+    await click(button("Sessions"));
+    await act(async () => api.listResponse!.resolve(json([second]))); await flush();
+    expect(host.querySelector('[role="dialog"] [role="alert"]')).toBeNull();
+    expect(buttonContaining("Run first")).not.toBeNull();
+    await click(buttonContaining("Run second")); await resolve(api, second);
+    expect(overviewTitle()).toBe("Run second");
+  });
+
+  it("ignores list responses from a closed picker when it is reopened", async () => {
+    const api = new Api(); const first = summary("first"); const second = summary("second");
+    const staleList = deferred<Response>(); api.listResponse = staleList;
+    await mount(api, route("first")); await resolve(api, first);
+    await click(button("Sessions"));
+    await click(host.querySelector('button[aria-label="Close session picker"]')!);
+    api.listResponse = deferred<Response>();
+    await click(button("Sessions"));
+    await act(async () => api.listResponse!.resolve(json([first, second]))); await flush();
+    await act(async () => staleList.resolve(json([summary("stale")]))); await flush();
+    expect(host.querySelector('[role="dialog"]')?.textContent).not.toContain("Run stale");
+    expect(buttonContaining("Run second")).not.toBeNull();
+    expect(host.querySelector('[role="dialog"]')?.getAttribute("aria-busy")).toBe("false");
+  });
+
   it("preserves picker filters and scroll after inspecting a session", async () => {
     const api = new Api(); const first = summary("first", "First"); const second = summary("second", "Second"); api.sessions = [first, second];
     await mount(api, route("first")); await resolve(api, first);

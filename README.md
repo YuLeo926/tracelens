@@ -1,8 +1,10 @@
-# 🔍 Tracelens
+# TraceLens
 
-**A local-first, zero-backend debugger for AI agent traces.** Drop in a trace — OpenInference, OTel/OTLP, Codex, or Claude Code — and get a readable call tree with timings, tokens, cost, and errors. Search it, flamegraph it, diff two runs, share it by link — like DevTools for a single agent run.
+**Local agent log viewer + MCP evidence tools.** Open supported local traces in a browser, or let an MCP client retrieve session overviews and event evidence with links back to the viewer.
 
-[![live demo](https://img.shields.io/badge/demo-live-3DC9C0)](https://yuleo926.github.io/tracelens/) ![license](https://img.shields.io/badge/license-MIT-E8A23D) ![types](https://img.shields.io/badge/TypeScript-strict-3DC9C0) ![backend](https://img.shields.io/badge/backend-none-8B7CF6) ![status](https://img.shields.io/badge/status-v2-A78BFA)
+[![live demo](https://img.shields.io/badge/demo-live-3DC9C0)](https://yuleo926.github.io/tracelens/) ![license](https://img.shields.io/badge/license-MIT-E8A23D) ![types](https://img.shields.io/badge/TypeScript-strict-3DC9C0) ![status](https://img.shields.io/badge/status-maintenance-777777)
+
+**Maintenance status:** active product expansion has ended. Work is limited to bug fixes, compatibility, and security maintenance. TraceLens has not demonstrated higher diagnostic accuracy or lower total analysis-token usage than an agent reading logs directly. Local evaluations of false-completion detection and cross-session rework analysis did not meet their acceptance criteria; these are not validated product benefits.
 
 **▶ [Try it live → yuleo926.github.io/tracelens](https://yuleo926.github.io/tracelens/)** — runs entirely in your browser, no install, nothing uploaded.
 
@@ -119,22 +121,20 @@ Share links and trace JSON downloads now open a review dialog first. The export 
 - Event details show errors, input, and output first. **Annotations** is a separate disclosure below the evidence. On narrow screens, details use the full width; **Back to events** returns to the selected row.
 - Export review offers readable **Events** and **Complete JSON** views. Filtering the preview does not filter the export. Every export requires a fresh confirmation of the entire frozen snapshot.
 
-Live watching checks modification time and file size before reading content: unchanged polls do not reread or reparse the log. Changed files still receive a full parse. Incremental parsing and list virtualization remain future work.
+Live watching checks modification time and file size before reading content: unchanged polls do not reread or reparse the log. Changed files still receive a full parse. Incremental parsing and list virtualization are not implemented.
 
-## Why
+## Scope
 
-Debugging an agent usually means scrolling through deeply nested JSON at midnight, hunting for the one tool call that looped or the step that quietly failed.
+Use the browser to inspect supported local logs, or MCP to retrieve bounded evidence and open a cited event. An agent can also search and read the original JSONL directly; TraceLens is an optional viewing and evidence-access tool, not a requirement for diagnosis.
 
-The heavyweight observability platforms can show you this — but most of them want you to stand up a backend (ClickHouse, Postgres, Redis, a server) just to look at a run. That is the right tool for production fleets. It is the wrong tool for "I have one trace and I want to understand it _right now_."
-
-**Tracelens is the lightweight companion.** Open a trace, see everything, close the tab. No account, no server, no upload — the file never leaves your browser.
+Manual browser imports need no server or account. CLI/MCP use runs a local process and an authenticated loopback viewer; evidence requested by an MCP client enters that client's conversation. Neither mode proves that a task was completed correctly.
 
 ## What it does
 
 - **Reads many formats, auto-detected** — OpenInference / OTel GenAI, raw OpenTelemetry (OTLP) JSON, Codex (`codex exec --json` and saved session rollouts), Claude Code transcripts, and raw Anthropic Messages logs — as JSON or JSONL. Drop the file; Tracelens figures out the format.
 - **Call tree with an inline waterfall** — every span is colored by kind (LLM, tool, retriever, agent…) and shows where in the run it happened and how long it took.
 - **Model thinking, surfaced** — Claude Code `thinking` blocks and Codex `reasoning` summaries show up as their own rows in the tree, right where they happened; click one to read the model's recorded thought process in full. They're searchable and annotatable like any other span — rate the *thinking*, not just the answer, when building eval sets. (This shows the thinking text your logs already record; encrypted thinking is marked as such, and it's not a window into model internals.)
-- **Live tail + conversation browser (Chromium)** — point it at a local agent-log folder (e.g. `~/.codex/sessions` or `~/.claude/projects`) and **browse its conversations**, each labeled by its first message and project (read from the file's head, so it's fast even with huge logs), newest first and filterable. Open any one to read it — watching **live** if it's still being written — or hit **Follow newest** to track the active run as it unfolds, auto-jumping to the latest step and pausing the moment you start inspecting (a "back to live" pill catches you up). Files are read straight from disk in your browser; nothing is uploaded.
+- **Live tail + conversation browser (Chromium)** — point it at a local agent-log folder (e.g. `~/.codex/sessions` or `~/.claude/projects`) and **browse its conversations**, each labeled by its first message and project when available in the file's head, newest first and filterable. Open any one to read it — watching **live** if it's still being written — or hit **Follow newest** to track the active run as it unfolds, auto-jumping to the latest step and pausing the moment you start inspecting (a "back to live" pill catches you up). Files are read straight from disk in your browser; nothing is uploaded.
 - **Folder overview dashboard** — opening a folder also gives you a bird's-eye **Overview** tab: total conversations, token usage with a cache-aware **rough cost estimate** (per-model rates for GPT-5.x / Codex / Claude), a 14-day activity timeline, a breakdown by project, and **runs with errors**. Usage is streamed from complete JSONL files and cached by file metadata; non-trace files are sniffed out so stray `.json` does not pollute the counts.
 - **Search + jump** — filter the tree as you type (`⌘K`) across names, models, input/output, and jump straight to the next error or the slowest span.
 - **Flamegraph** — see where the time and the money went, weighted by duration, tokens, or cost.
@@ -222,7 +222,7 @@ src/
 └─ components/           # shell · views (tree / flamegraph / diff) · detail · loader
 ```
 
-## Roadmap
+## Shipped Features
 
 **v0 — shipped.** Parse a trace, render the tree + inline waterfall, detail panel, bundled samples.
 
@@ -239,10 +239,7 @@ src/
 - ✅ Span annotations — rate spans 👍/👎 with tags + notes (saved locally, auto-restored) and export them as JSONL/CSV evaluation datasets
 - ✅ Folder overview dashboard — a per-folder Overview tab: conversations, tokens, a cache-aware rough cost estimate, a 14-day activity timeline, by-project breakdown, and runs-with-errors
 
-**Backlog — parked until there's real demand.**
-- Performance pass for very large logs — incremental tail reads + list virtualization, for when huge session files start to feel slow
-- Headless component library — publish the views as a shadcn-style package to embed in other apps. Want this? [Open an issue](https://github.com/YuLeo926/tracelens/issues).
-- Tauri desktop build — true push-based tailing and non-Chromium support, if the browser version ever falls short
+There is no active feature-expansion roadmap. Previously discussed large-log architecture changes, an embeddable component library, and a desktop wrapper are not scheduled.
 
 ## Renaming the project
 
@@ -250,7 +247,7 @@ The name appears in exactly three places: the `name` field in `package.json`, th
 
 ## Contributing
 
-PRs welcome — the highest-leverage contributions are **new trace-format adapters** in [`src/core/adapters/`](src/core/adapters) (each is one self-contained file with a `detect` + a `toLooseSpans`) and **sample traces** in `public/samples/`. Please run `npm test` before opening a PR.
+Maintenance PRs for reproducible bugs, compatibility issues, and security fixes are welcome. Keep changes focused and run `npm test` before opening a PR. New product directions and feature expansion are out of scope for the maintenance phase.
 
 ## License
 

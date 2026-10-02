@@ -68,6 +68,8 @@ export default function App() {
   const [sessionNavigation, setSessionNavigation] = useState(() => createSessionNavigation(localSessionRoute(window.location.search)));
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
+  const [sessionListLoading, setSessionListLoading] = useState(false);
+  const [sessionListError, setSessionListError] = useState<string | null>(null);
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const pickerMemory = useRef<SessionPickerMemory>({ filters: EMPTY_SESSION_FILTERS, scrollTop: 0 });
   const sessionOpenerRef = useRef<HTMLButtonElement>(null);
@@ -231,20 +233,16 @@ export default function App() {
     }
 
     const client = createViewerClient(token);
-    void Promise.all([client.loadSession(sessionId, route.eventId ?? undefined), client.listSessions()])
-      .then(([payload, sessions]) => {
+    void client.loadSession(sessionId, route.eventId ?? undefined)
+      .then((payload) => {
         if (cancelled || !isCurrentSessionRequest(sessionNavigationRef.current, request, route)) return;
         const parsed = parseTraceText(payload.source);
         const selection = sessionEventSelection(payload.selectedEventId ?? route.eventId, parsed.byId, parsed.roots[0]?.spanId ?? null);
-        const availableSessions = sessions.some((item) => item.id === payload.session.id)
-          ? sessions
-          : [payload.session, ...sessions];
-
         setTrace(parsed);
         setLabel(payload.session.title || "Local session");
         setRawSource(payload.source);
         setSessionSummary(payload.session);
-        setSessionList(availableSessions);
+        setSessionList((sessions) => [payload.session, ...sessions.filter((item) => item.id !== payload.session.id)]);
         setSelectedId(selection.selectedId);
         setActiveView(selection.view);
         clearSearch();
@@ -263,6 +261,27 @@ export default function App() {
 
     return () => { cancelled = true; };
   }, [closeSessionPicker, replaceSessionNavigation, sessionNavigation]);
+
+  // Listing discovers and parses other logs; keep it off the event deep-link path.
+  useEffect(() => {
+    if (!sessionPickerOpen || !localSessionEnabled || !sessionSummary) return;
+    const token = readViewerToken(window.location.hash);
+    if (!token) return;
+    let cancelled = false;
+    setSessionListLoading(true);
+    setSessionListError(null);
+    void createViewerClient(token).listSessions()
+      .then((sessions) => {
+        if (cancelled) return;
+        setSessionList(sessions.some((item) => item.id === sessionSummary.id)
+          ? sessions : [sessionSummary, ...sessions]);
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setSessionListError(loadError instanceof Error ? loadError.message : "TraceLens could not list sessions.");
+      })
+      .finally(() => { if (!cancelled) setSessionListLoading(false); });
+    return () => { cancelled = true; };
+  }, [sessionPickerOpen, localSessionEnabled, sessionSummary]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -521,8 +540,8 @@ export default function App() {
           <SessionPicker
             sessions={sessionList}
             activeId={sessionSummary.id}
-            loading={sessionLoading}
-            error={sessionError}
+            loading={sessionLoading || sessionListLoading}
+            error={sessionError || sessionListError}
             onSelect={selectSession}
             onClose={closeSessionPicker}
             memory={pickerMemory}
